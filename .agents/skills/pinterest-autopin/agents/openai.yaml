@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pinterest AutoPin"
+  short_description: "Validate, test, and publish Pinterest Pins"
+  default_prompt: "Use $pinterest-autopin to validate and publish this Pinterest Pin."
