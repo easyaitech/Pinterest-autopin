@@ -1,6 +1,6 @@
 {
   "name": "pinterest-autopin",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Single-pin Pinterest publishing with CLI and Hermes Skill interfaces",
   "main": "publish_playwright.js",
   "bin": {
@@ -11,7 +11,9 @@
     "test": "python3 -m unittest discover -s tests",
     "pin:validate": "python3 tools/pinterest_publish_pin.py --mode validate",
     "pin:test": "python3 tools/pinterest_publish_pin.py --mode test",
-    "pin:publish": "python3 tools/pinterest_publish_pin.py --mode final"
+    "pin:publish": "python3 tools/pinterest_publish_pin.py --mode final",
+    "pin:profile": "python3 tools/pinterest_publish_pin.py --print-chrome-profile",
+    "pin:init-profile": "python3 tools/pinterest_publish_pin.py --init-chrome-profile"
   },
   "keywords": [
     "pinterest",

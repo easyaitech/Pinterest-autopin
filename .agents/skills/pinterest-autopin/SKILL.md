@@ -51,8 +51,7 @@ Prepare a JSON object with this shape:
   "board": "Pinterest board name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description",
-  "chromeProfile": "/absolute/path/to/chrome-profile"
+  "altText": "Accessible image description"
 }
 ```
 
@@ -67,10 +66,18 @@ Optional:
 - `link`
 - `description`
 - `altText`
-- `chromeProfile`, recommended for `test` and `final` mode
+- `chromeProfile`, only needed to override the default dedicated profile
 
 `link`, when present, must be an absolute `http` or `https` URL.
-`chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it does not exist yet, the tool will create it, but Pinterest login may be required.
+`chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it is omitted, the CLI resolves a stable profile automatically.
+
+Default profile resolution order:
+
+1. CLI `--chrome-profile`
+2. JSON `chromeProfile`, `chrome_profile`, or `chrome-profile`
+3. `PINTEREST_AUTOPIN_CHROME_PROFILE`
+4. `~/.pinterest-autopin/config.json`
+5. `~/.pinterest-autopin/chrome-profile`
 
 ## Workflow
 
@@ -88,21 +95,24 @@ npm install
 python3 tools/pinterest_publish_pin.py --input /path/to/request.json --mode validate
 ```
 
-4. If validation reports missing dependencies, fix them if safe. For `test` and `final`, prefer a dedicated Chrome profile:
+4. If validation reports missing dependencies, fix them if safe. To see which dedicated Chrome profile will be used:
 
 ```bash
-mkdir -p "$HOME/.pinterest-autopin/chrome-profile"
+python3 tools/pinterest_publish_pin.py --print-chrome-profile
 ```
 
-If the user has not provided one, ask for the profile path instead of requiring Chrome CDP.
+If the profile has not been created yet, initialize and remember it:
+
+```bash
+python3 tools/pinterest_publish_pin.py --init-chrome-profile
+```
 
 5. For a preview that fills the Pinterest form but does not publish:
 
 ```bash
 python3 tools/pinterest_publish_pin.py \
   --input /path/to/request.json \
-  --mode test \
-  --chrome-profile /absolute/path/to/chrome-profile
+  --mode test
 ```
 
 6. For a real publish only after explicit user intent:
@@ -110,8 +120,7 @@ python3 tools/pinterest_publish_pin.py \
 ```bash
 python3 tools/pinterest_publish_pin.py \
   --input /path/to/request.json \
-  --mode final \
-  --chrome-profile /absolute/path/to/chrome-profile
+  --mode final
 ```
 
 ## Interpret results
@@ -133,7 +142,7 @@ For `final` mode, report the `pinUrl` if present. If `ok` is true but `pinUrl` i
 - `image does not exist`: ask for or locate the correct absolute image path.
 - `board is required`: ask for the exact Pinterest board name.
 - `playwright dependency is not installed`: run `npm install` in the repo.
-- `chromeProfile is required`: ask the user for an absolute path to a dedicated Chrome profile directory, or create one under their home directory.
+- `chromeProfile is required`: run `--print-chrome-profile` or `--init-chrome-profile`; this should only happen when defaults were explicitly disabled.
 - `未能确认 Board 已选中`: the board name did not match Pinterest's UI; ask for the exact visible board name, or use a `Full Board Name|Short Alias` value.
 - Upload or Publish button failures usually mean Pinterest changed its UI or the account session needs manual attention.
 

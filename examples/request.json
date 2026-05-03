@@ -4,6 +4,5 @@
   "board": "Home Decor",
   "link": "https://example.com/product",
   "description": "Soft neutral textures for a calm and inviting home.",
-  "altText": "Neutral home decor styling with soft textures and warm light.",
-  "chromeProfile": "/absolute/path/to/chrome-profile"
+  "altText": "Neutral home decor styling with soft textures and warm light."
 }

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "tools" / "pinterest_publish_pin.py"
@@ -25,6 +28,18 @@ def fake_checks(chrome_cdp_reachable: bool = True) -> dict:
 
 
 class PinterestPublishPinValidationTest(unittest.TestCase):
+    def args(self, *, chrome_profile: str | None = None, no_default: bool = True) -> argparse.Namespace:
+        return argparse.Namespace(
+            image=None,
+            title=None,
+            board=None,
+            link=None,
+            description=None,
+            alt_text=None,
+            chrome_profile=chrome_profile,
+            no_default_chrome_profile=no_default,
+        )
+
     def make_image(self) -> str:
         image = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
         image.write(b"not a real image, but validate only checks path existence")
@@ -156,34 +171,95 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         self.assertEqual([], test_warnings)
 
     def test_normalize_payload_preserves_bad_types_for_validation(self) -> None:
-        args = argparse.Namespace(
-            image=None,
-            title=None,
-            board=None,
-            link=None,
-            description=None,
-            alt_text=None,
-            chrome_profile=None,
-        )
-
-        payload = pinterest_publish_pin.normalize_payload({"title": 123}, args)
+        payload = pinterest_publish_pin.normalize_payload({"title": 123}, self.args())
 
         self.assertEqual(123, payload["title"])
 
     def test_normalize_payload_accepts_chrome_profile_alias(self) -> None:
-        args = argparse.Namespace(
-            image=None,
-            title=None,
-            board=None,
-            link=None,
-            description=None,
-            alt_text=None,
-            chrome_profile=None,
+        payload = pinterest_publish_pin.normalize_payload(
+            {"chrome_profile": "/tmp/profile"}, self.args()
         )
 
-        payload = pinterest_publish_pin.normalize_payload({"chrome_profile": "/tmp/profile"}, args)
-
         self.assertEqual("/tmp/profile", payload["chromeProfile"])
+
+    def test_normalize_payload_uses_default_profile_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            default_profile = Path(temp_dir) / "default-profile"
+            config_path = Path(temp_dir) / "config.json"
+            with patch.object(pinterest_publish_pin, "DEFAULT_CHROME_PROFILE", default_profile):
+                with patch.object(pinterest_publish_pin, "CONFIG_PATH", config_path):
+                    with patch.dict(
+                        os.environ, {pinterest_publish_pin.PROFILE_ENV_VAR: ""}, clear=False
+                    ):
+                        payload, profile_meta = pinterest_publish_pin.normalize_payload_with_meta(
+                            {}, self.args(no_default=False)
+                        )
+
+        self.assertEqual(str(default_profile), payload["chromeProfile"])
+        self.assertEqual("default", profile_meta["source"])
+
+    def test_normalize_payload_uses_env_profile_before_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_profile = str(Path(temp_dir) / "env-profile")
+            config_path = Path(temp_dir) / "config.json"
+            with patch.object(pinterest_publish_pin, "CONFIG_PATH", config_path):
+                with patch.dict(
+                    os.environ, {pinterest_publish_pin.PROFILE_ENV_VAR: env_profile}, clear=False
+                ):
+                    payload, profile_meta = pinterest_publish_pin.normalize_payload_with_meta(
+                        {}, self.args(no_default=False)
+                    )
+
+        self.assertEqual(env_profile, payload["chromeProfile"])
+        self.assertEqual(
+            f"env:{pinterest_publish_pin.PROFILE_ENV_VAR}",
+            profile_meta["source"],
+        )
+
+    def test_normalize_payload_uses_config_profile_before_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_profile = str(Path(temp_dir) / "config-profile")
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps({"chromeProfile": config_profile}), encoding="utf-8"
+            )
+            with patch.object(pinterest_publish_pin, "CONFIG_PATH", config_path):
+                with patch.dict(
+                    os.environ, {pinterest_publish_pin.PROFILE_ENV_VAR: ""}, clear=False
+                ):
+                    payload, profile_meta = pinterest_publish_pin.normalize_payload_with_meta(
+                        {}, self.args(no_default=False)
+                    )
+
+        self.assertEqual(config_profile, payload["chromeProfile"])
+        self.assertEqual(f"config:{config_path}", profile_meta["source"])
+
+    def test_no_default_chrome_profile_preserves_empty_profile(self) -> None:
+        payload, profile_meta = pinterest_publish_pin.normalize_payload_with_meta({}, self.args())
+
+        self.assertEqual("", payload["chromeProfile"])
+        self.assertEqual("none", profile_meta["source"])
+
+    def test_expand_profile_path_accepts_tilde_and_environment_variables(self) -> None:
+        with patch.dict(os.environ, {"PIN_PROFILE_ROOT": "/tmp/pinterest"}, clear=False):
+            payload = pinterest_publish_pin.normalize_payload(
+                {"chromeProfile": "$PIN_PROFILE_ROOT/profile"}, self.args()
+            )
+
+        self.assertEqual("/tmp/pinterest/profile", payload["chromeProfile"])
+
+    def test_init_chrome_profile_creates_directory_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_dir = Path(temp_dir) / "profile"
+            config_path = Path(temp_dir) / "config.json"
+
+            with patch.object(pinterest_publish_pin, "CONFIG_PATH", config_path):
+                pinterest_publish_pin.init_chrome_profile(str(profile_dir))
+
+            self.assertTrue(profile_dir.is_dir())
+            config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual({"chromeProfile": str(profile_dir)}, config_payload)
 
 
 if __name__ == "__main__":
