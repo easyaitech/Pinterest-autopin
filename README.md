@@ -269,7 +269,7 @@ Local development must opt in explicitly:
 python3 tools/feishu_pinterest_worker.py doctor --config /path/to/worker-config.json --local-dev
 ```
 
-Feishu access is through a CLI boundary only. The worker expects a configurable Feishu CLI binary and JSON output; tests mock this boundary and never call live Feishu, live AI, or live Pinterest.
+Feishu access is through a CLI boundary only. The worker expects a configurable Feishu CLI binary and JSON output; tests mock this boundary and never call live Feishu, live AI, or live Pinterest. Do not deploy an OpenAI API key for this worker. Model calls belong to the Hermes agent runtime, not the Feishu/Pinterest worker process.
 
 The Feishu CLI boundary must support:
 

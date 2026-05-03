@@ -3,8 +3,7 @@
   "feishu_cli": "feishu",
   "worker_version": "dev",
   "required_hermes_secrets": [
-    "FEISHU_ACCESS_TOKEN",
-    "OPENAI_API_KEY"
+    "FEISHU_ACCESS_TOKEN"
   ],
   "tables": {
     "brands": {

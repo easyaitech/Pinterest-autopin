@@ -28,8 +28,8 @@ class HermesRuntimeTest(unittest.TestCase):
             "HERMES_JOB_ID": "job-1",
         }
 
-        with self.assertRaisesRegex(RuntimeErrorConfig, "OPENAI_API_KEY"):
-            build_runtime_context(env=env, required_secrets=("OPENAI_API_KEY",))
+        with self.assertRaisesRegex(RuntimeErrorConfig, "FEISHU_ACCESS_TOKEN"):
+            build_runtime_context(env=env, required_secrets=("FEISHU_ACCESS_TOKEN",))
 
     def test_uses_runtime_temp_and_profile_env(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
