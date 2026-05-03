@@ -84,6 +84,7 @@ For JSON-based agent calls, `chromeProfile` is optional. Include it only when yo
 ```
 
 An already running Chrome CDP session on port `9222` is still supported as a legacy fallback with `--no-default-chrome-profile`, but it is no longer the recommended setup.
+That flag disables saved/default profile lookup; explicit CLI, JSON, or environment profile values still win.
 
 ## Install From GitHub
 

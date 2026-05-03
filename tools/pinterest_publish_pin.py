@@ -123,12 +123,12 @@ def resolve_chrome_profile(payload: dict[str, Any], args: argparse.Namespace) ->
     if env_value:
         return expand_profile_path(env_value), f"env:{PROFILE_ENV_VAR}"
 
+    if getattr(args, "no_default_chrome_profile", False):
+        return "", "none"
+
     config_value = read_config_chrome_profile()
     if config_value not in (None, ""):
         return expand_profile_path(config_value), f"config:{CONFIG_PATH}"
-
-    if getattr(args, "no_default_chrome_profile", False):
-        return "", "none"
 
     return str(DEFAULT_CHROME_PROFILE), "default"
 
