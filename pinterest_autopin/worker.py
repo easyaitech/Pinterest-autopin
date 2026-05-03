@@ -80,7 +80,11 @@ class FeishuPinterestWorker:
             required_secrets=config.required_hermes_secrets,
             chrome_profile=chrome_profile or None,
         )
-        store = FeishuCli(binary=config.feishu_cli, app_token=config.app_token)
+        store = FeishuCli(
+            binary=config.feishu_cli,
+            app_token=config.app_token,
+            flavor=config.feishu_cli_flavor,
+        )
         publisher = PinterestPublisher()
         return cls(config=config, runtime=runtime, store=store, publisher=publisher)
 
@@ -282,10 +286,20 @@ class FeishuPinterestWorker:
         source_path = self._prepare_source_image(record_id, fields)
         prepared = prepare_image(source_path, self.runtime.temp_dir / "prepared-images")
         processed_ref: list[dict[str, str]] = []
-        upload = getattr(self.store, "upload_attachment", None)
-        if callable(upload):
-            token = upload(str(prepared.output_path))
+        record_upload = getattr(self.store, "upload_record_attachment", None)
+        if callable(record_upload):
+            token = record_upload(
+                self.config.pins.table_id,
+                record_id,
+                dict(self.config.pins.fields).get("processed_image", "processed_image"),
+                str(prepared.output_path),
+            )
             processed_ref = [{"file_token": token, "name": prepared.output_path.name}]
+        else:
+            upload = getattr(self.store, "upload_attachment", None)
+            if callable(upload):
+                token = upload(str(prepared.output_path))
+                processed_ref = [{"file_token": token, "name": prepared.output_path.name}]
         draft = _draft_from_fields(fields)
         update: dict[str, Any] = {
             "draft_title": draft["title"],

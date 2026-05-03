@@ -45,6 +45,7 @@ class WorkerConfig:
     runs: TableConfig
     runtime_locks: TableConfig
     feishu_cli: str = "feishu"
+    feishu_cli_flavor: str = "auto"
     status_values: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_STATUS_VALUES))
     required_hermes_secrets: tuple[str, ...] = ()
     worker_version: str = "dev"
@@ -98,6 +99,7 @@ def worker_config_from_dict(payload: Mapping[str, Any]) -> WorkerConfig:
         runs=_table(tables, "runs"),
         runtime_locks=_table(tables, "runtime_locks"),
         feishu_cli=str(payload.get("feishu_cli", "feishu")),
+        feishu_cli_flavor=str(payload.get("feishu_cli_flavor", "auto")),
         status_values=status_values,
         required_hermes_secrets=tuple(str(name) for name in required),
         worker_version=str(payload.get("worker_version", "dev")),

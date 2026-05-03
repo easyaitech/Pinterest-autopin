@@ -1,6 +1,7 @@
 {
   "app_token": "<local-feishu-base-app-token>",
-  "feishu_cli": "feishu",
+  "feishu_cli": "lark-cli",
+  "feishu_cli_flavor": "lark",
   "worker_version": "dev",
   "required_hermes_secrets": [
     "FEISHU_ACCESS_TOKEN"

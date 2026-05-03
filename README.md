@@ -291,11 +291,29 @@ python3 tools/feishu_pinterest_worker.py doctor --config .gstack/feishu-worker-c
 
 Feishu access is through a CLI boundary only. The worker expects a configurable Feishu CLI binary and JSON output; tests mock this boundary and never call live Feishu, live AI, or live Pinterest. Do not deploy an OpenAI API key for this worker. Model calls belong to the Hermes agent runtime, not the Feishu/Pinterest worker process.
 
-The Feishu CLI boundary must support:
+Official `lark-cli` is supported with:
+
+```json
+{
+  "feishu_cli": "lark-cli",
+  "feishu_cli_flavor": "lark"
+}
+```
+
+Legacy wrappers can still use `feishu_cli_flavor: "bitable"` if they expose the old command shape:
 
 - paginated `bitable records list` with `has_more` and `page_token` JSON fields
 - atomic `bitable records compare-update` for runtime locks
 - `bitable attachments download` and `bitable attachments upload`
+
+Official `lark-cli` uses:
+
+- `base +record-list`
+- `base +record-upsert`
+- `base +record-upload-attachment`
+- `drive +download`
+
+`publish` still requires an atomic runtime lock; if the CLI does not expose atomic compare-update, the worker refuses to acquire the shared Pinterest profile lock instead of using a non-atomic fallback.
 
 `prepare` claims ready rows, downloads `source_image`, writes draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
 

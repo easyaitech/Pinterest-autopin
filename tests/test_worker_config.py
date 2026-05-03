@@ -62,6 +62,15 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual("fld_status", config.pins.fields["status"])
         self.assertEqual([], validate_worker_config(config))
 
+    def test_loads_official_lark_cli_flavor(self) -> None:
+        payload = config_payload()
+        payload["feishu_cli"] = "lark-cli"
+        payload["feishu_cli_flavor"] = "lark"
+        config = worker_config_from_dict(payload)
+
+        self.assertEqual("lark-cli", config.feishu_cli)
+        self.assertEqual("lark", config.feishu_cli_flavor)
+
     def test_missing_table_fails(self) -> None:
         payload = config_payload()
         del payload["tables"]["pins"]
