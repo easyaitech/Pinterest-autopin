@@ -9,6 +9,7 @@ const { chromium } = require('playwright');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { classifyPinterestLoginState } = require('./pinterest_login_state');
 
 // 配置
 const CDP_PORT = 9222;
@@ -158,11 +159,9 @@ async function checkPinterestLogin(chromeProfile) {
       return { url, loginWall, hasCreateSurface };
     });
 
-    if (state.loginWall || !state.hasCreateSurface) {
-      const reason = state.loginWall
-        ? `Pinterest login required at ${state.url}`
-        : `Pinterest create surface not detected at ${state.url}`;
-      throw new Error(reason);
+    const loginState = classifyPinterestLoginState(state);
+    if (!loginState.ok) {
+      throw new Error(loginState.reason);
     }
 
     const result = {
