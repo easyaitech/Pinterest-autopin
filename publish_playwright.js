@@ -142,7 +142,20 @@ async function checkPinterestLogin(chromeProfile) {
     }).catch((e) => {
       logWarn(`导航超时，尝试继续: ${e.message}`);
     });
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(() => {
+      const bodyText = document.body?.innerText || '';
+      const url = window.location.href;
+      const loginWall =
+        /\/login/i.test(url) ||
+        /log in|sign up|登录|注册/i.test(bodyText);
+      const hasCreateSurface = Boolean(
+        document.querySelector('input[type="file"]') ||
+        document.querySelector('textarea[placeholder="Add your title"]') ||
+        document.querySelector('textarea[data-test-id="pin-draft-title"]') ||
+        document.querySelector('[data-test-id*="media"]')
+      );
+      return loginWall || hasCreateSurface;
+    }, null, { timeout: 15000 }).catch(() => {});
 
     const state = await page.evaluate(() => {
       const bodyText = document.body?.innerText || '';
