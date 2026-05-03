@@ -9,6 +9,15 @@ Use this skill to create one Pinterest Pin with the automation in the `easyaitec
 
 This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_publish_pin.py`, and both interfaces share the same Playwright publisher in `publish_playwright.js`.
 
+For Hermes Feishu workflow setup, run the guided onboarding command before `prepare` or `publish`:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json
+```
+
+Treat `readyForPrepare: true` as permission to run content generation. Treat `readyForPublish: true` as permission to schedule final publishing. If `nextActions` is not empty, guide the user through those actions first.
+Use `--target prepare` before generation jobs and `--target publish` before final publish jobs.
+
 ## Ground rules
 
 - Never ask for or store Pinterest credentials. Use a dedicated Chrome profile and let the user sign in directly inside Chrome if needed.

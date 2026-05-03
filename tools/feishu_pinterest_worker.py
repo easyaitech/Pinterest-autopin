@@ -14,17 +14,38 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pinterest_autopin.hermes_runtime import RuntimeErrorConfig
+from pinterest_autopin.onboarding import DEFAULT_CONFIG, run_onboarding
 from pinterest_autopin.worker import FeishuPinterestWorker, WorkerResult
 from pinterest_autopin.worker_config import ConfigError, load_worker_config
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Feishu-backed Pinterest workflow.")
-    parser.add_argument("command", choices=("doctor", "prepare", "publish"))
-    parser.add_argument("--config", required=True, help="Path to worker config JSON.")
+    parser.add_argument("command", choices=("onboard", "doctor", "prepare", "publish"))
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG),
+        help="Path to worker config JSON. Defaults to .gstack/feishu-worker-config.json.",
+    )
     parser.add_argument("--limit", type=int, help="Maximum records to process.")
     parser.add_argument("--local-dev", action="store_true", help="Use explicit local:<uuid> run identity.")
     parser.add_argument("--chrome-profile", default="", help="Override Pinterest Chrome profile path.")
+    parser.add_argument(
+        "--skip-pinterest-login-check",
+        action="store_true",
+        help="Do not run the live Pinterest check-login step during onboarding.",
+    )
+    parser.add_argument(
+        "--publish-singleton-confirmed",
+        action="store_true",
+        help="Assert Hermes publish runs are configured with max concurrency 1.",
+    )
+    parser.add_argument(
+        "--target",
+        choices=("prepare", "publish"),
+        default="publish",
+        help="Onboarding gate target. prepare ignores publish-only blockers.",
+    )
     return parser.parse_args()
 
 
@@ -46,6 +67,17 @@ def result_payload(result: WorkerResult) -> dict:
 
 def main() -> int:
     args = parse_args()
+    if args.command == "onboard":
+        payload = run_onboarding(
+            config_path=Path(args.config),
+            local_dev=args.local_dev,
+            chrome_profile=args.chrome_profile,
+            check_pinterest_login=not args.skip_pinterest_login_check,
+            publish_singleton_confirmed=args.publish_singleton_confirmed,
+            target=args.target,
+        )
+        return print_json(payload, 0 if payload["ok"] else 1)
+
     try:
         config = load_worker_config(Path(args.config))
         worker = FeishuPinterestWorker.from_config(

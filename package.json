@@ -15,6 +15,7 @@
     "pin:check-login": "python3 tools/pinterest_publish_pin.py --mode check-login",
     "pin:profile": "python3 tools/pinterest_publish_pin.py --print-chrome-profile",
     "pin:init-profile": "python3 tools/pinterest_publish_pin.py --init-chrome-profile",
+    "worker:onboard": "python3 tools/feishu_pinterest_worker.py onboard",
     "worker:doctor": "python3 tools/feishu_pinterest_worker.py doctor",
     "worker:prepare": "python3 tools/feishu_pinterest_worker.py prepare",
     "worker:publish": "python3 tools/feishu_pinterest_worker.py publish"

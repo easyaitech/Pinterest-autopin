@@ -268,9 +268,38 @@ Invoke it as `$pinterest-autopin` in a Hermes-compatible agent. The Skill intent
 The multi-step Feishu workflow uses a separate worker CLI:
 
 ```bash
+python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json
 python3 tools/feishu_pinterest_worker.py doctor --config .gstack/feishu-worker-config.json
 python3 tools/feishu_pinterest_worker.py prepare --config .gstack/feishu-worker-config.json --limit 10
 python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-config.json --limit 1
+```
+
+Run `onboard` first in Hermes. It returns a structured checklist that tells the agent and user exactly which setup step is still missing: dependency install, Hermes run identity, Feishu CLI auth, local Feishu config, Feishu table doctor, Pinterest Chrome profile, Pinterest login, and publish singleton protection.
+
+Use it as a gate before each phase:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target prepare
+
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target publish
+```
+
+For local setup checks:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json --local-dev
+```
+
+If official `lark-cli` is used for Feishu, final publish needs Hermes to enforce one publish run at a time because `lark-cli` does not expose an atomic compare-update operation. After configuring the Hermes publish job with max concurrency 1, run onboarding with:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --publish-singleton-confirmed
 ```
 
 Create the real config by copying `examples/worker-config.example.json` into an ignored local path such as `.gstack/feishu-worker-config.json`. Do not edit the committed example with real Feishu values.
@@ -311,7 +340,7 @@ Official `lark-cli` uses:
 - `base +record-list`
 - `base +record-upsert`
 - `base +record-upload-attachment`
-- `drive +download`
+- `api GET /open-apis/drive/v1/medias/{file_token}/download`
 
 `publish` still requires an atomic runtime lock; if the CLI does not expose atomic compare-update, the worker refuses to acquire the shared Pinterest profile lock instead of using a non-atomic fallback.
 
