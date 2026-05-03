@@ -1,11 +1,11 @@
 ---
 name: pinterest-autopin
-description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the local Pinterest AutoPin Playwright automation, including preparing the request JSON, checking Chrome CDP readiness, running dry-run form fill, and doing a real publish only when explicitly requested.
+description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository, including preparing the request JSON, checking Chrome CDP readiness, running dry-run form fill, and doing a real publish only when explicitly requested.
 ---
 
 # Pinterest AutoPin
 
-Use this skill to create one Pinterest Pin with the local automation in the `Pinterest-autopin` repo.
+Use this skill to create one Pinterest Pin with the automation in the `easyaitech/Pinterest-autopin` repo.
 
 This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_publish_pin.py`, and both interfaces share the same Playwright publisher in `publish_playwright.js`.
 
@@ -19,10 +19,19 @@ This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_p
 
 ## Locate the tool
 
-Use the current repo root if it contains `tools/pinterest_publish_pin.py`; otherwise use:
+Use the current repo root if it contains `tools/pinterest_publish_pin.py`.
 
 ```bash
-/Users/johnz/code/Pinterest-autopin
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+test -f "$REPO_ROOT/tools/pinterest_publish_pin.py" && cd "$REPO_ROOT"
+```
+
+If the tool is not present, clone the public repository first:
+
+```bash
+git clone https://github.com/easyaitech/Pinterest-autopin.git
+cd Pinterest-autopin
+npm install
 ```
 
 The stable entrypoint is:

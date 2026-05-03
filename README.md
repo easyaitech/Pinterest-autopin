@@ -30,10 +30,47 @@ publish_playwright.js
 - Chrome running with CDP on port `9222`
 - `npm install`
 
-## Install
+## Install From GitHub
+
+For Hermes, OpenClaw, or any agent that can install project skills from a GitHub repository, use the public repo:
 
 ```bash
-cd /Users/johnz/code/Pinterest-autopin
+git clone https://github.com/easyaitech/Pinterest-autopin.git
+cd Pinterest-autopin
+npm install
+```
+
+The Skill is stored at:
+
+```text
+.agents/skills/pinterest-autopin
+```
+
+Use it from an agent as:
+
+```text
+$pinterest-autopin
+```
+
+If your agent supports installing a Skill by repository URL, point it at:
+
+```text
+https://github.com/easyaitech/Pinterest-autopin
+```
+
+If your agent expects a Skill subdirectory, point it at:
+
+```text
+.agents/skills/pinterest-autopin
+```
+
+The Skill depends on the repository CLI, so keep the cloned repo available on the machine that will publish Pins.
+
+## Local Install
+
+```bash
+git clone https://github.com/easyaitech/Pinterest-autopin.git
+cd Pinterest-autopin
 npm install
 ```
 
