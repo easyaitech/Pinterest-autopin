@@ -83,6 +83,21 @@ class WorkerConfigTest(unittest.TestCase):
 
         self.assertIn("pins.fields.publish_attempts is required", validate_worker_config(config))
 
+    def test_public_example_placeholders_are_rejected(self) -> None:
+        payload = config_payload()
+        payload["app_token"] = "<local-feishu-base-app-token>"
+        payload["tables"]["pins"]["table_id"] = "<local-pins-table-id>"
+        payload["tables"]["pins"]["fields"]["status"] = "<field-status>"
+        config = worker_config_from_dict(payload)
+        errors = validate_worker_config(config)
+
+        self.assertIn("app_token must be replaced in a local ignored config file", errors)
+        self.assertIn("pins.table_id must be replaced in a local ignored config file", errors)
+        self.assertIn(
+            "pins.fields.status must be replaced in a local ignored config file",
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

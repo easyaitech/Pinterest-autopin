@@ -1,5 +1,5 @@
 {
-  "app_token": "bascn_xxx",
+  "app_token": "<local-feishu-base-app-token>",
   "feishu_cli": "feishu",
   "worker_version": "dev",
   "required_hermes_secrets": [
@@ -7,69 +7,69 @@
   ],
   "tables": {
     "brands": {
-      "table_id": "tbl_brands",
+      "table_id": "<local-brands-table-id>",
       "fields": {
-        "brand_id": "fld_brand_id",
-        "brand_name": "fld_brand_name",
-        "tone": "fld_tone"
+        "brand_id": "<field-brand-id>",
+        "brand_name": "<field-brand-name>",
+        "tone": "<field-tone>"
       }
     },
     "pins": {
-      "table_id": "tbl_pins",
+      "table_id": "<local-pins-table-id>",
       "fields": {
-        "status": "fld_status",
-        "scheduled_at": "fld_scheduled_at",
-        "publisher_run_id": "fld_publisher_run_id",
-        "claim_expires_at": "fld_claim_expires_at",
-        "last_attempt_at": "fld_last_attempt_at",
-        "publish_attempts": "fld_publish_attempts",
-        "prepare_run_id": "fld_prepare_run_id",
-        "prepare_expires_at": "fld_prepare_expires_at",
-        "last_error": "fld_last_error",
-        "product_name": "fld_product_name",
-        "product_link": "fld_product_link",
-        "pinterest_board": "fld_pinterest_board",
-        "source_image": "fld_source_image",
-        "processed_image": "fld_processed_image",
-        "draft_title": "fld_draft_title",
-        "draft_description": "fld_draft_description",
-        "draft_tags": "fld_draft_tags",
-        "draft_alt_text": "fld_draft_alt_text",
-        "final_title": "fld_final_title",
-        "final_description": "fld_final_description",
-        "final_tags": "fld_final_tags",
-        "final_alt_text": "fld_final_alt_text",
-        "final_board": "fld_final_board",
-        "final_image": "fld_final_image",
-        "pin_url": "fld_pin_url",
-        "published_at": "fld_published_at"
+        "status": "<field-status>",
+        "scheduled_at": "<field-scheduled-at>",
+        "publisher_run_id": "<field-publisher-run-id>",
+        "claim_expires_at": "<field-claim-expires-at>",
+        "last_attempt_at": "<field-last-attempt-at>",
+        "publish_attempts": "<field-publish-attempts>",
+        "prepare_run_id": "<field-prepare-run-id>",
+        "prepare_expires_at": "<field-prepare-expires-at>",
+        "last_error": "<field-last-error>",
+        "product_name": "<field-product-name>",
+        "product_link": "<field-product-link>",
+        "pinterest_board": "<field-pinterest-board>",
+        "source_image": "<field-source-image>",
+        "processed_image": "<field-processed-image>",
+        "draft_title": "<field-draft-title>",
+        "draft_description": "<field-draft-description>",
+        "draft_tags": "<field-draft-tags>",
+        "draft_alt_text": "<field-draft-alt-text>",
+        "final_title": "<field-final-title>",
+        "final_description": "<field-final-description>",
+        "final_tags": "<field-final-tags>",
+        "final_alt_text": "<field-final-alt-text>",
+        "final_board": "<field-final-board>",
+        "final_image": "<field-final-image>",
+        "pin_url": "<field-pin-url>",
+        "published_at": "<field-published-at>"
       }
     },
     "runs": {
-      "table_id": "tbl_runs",
+      "table_id": "<local-runs-table-id>",
       "fields": {
-        "run_id": "fld_run_id",
-        "pin": "fld_pin",
-        "action": "fld_action",
-        "ok": "fld_ok",
-        "input_snapshot": "fld_input_snapshot",
-        "output_snapshot": "fld_output_snapshot",
-        "error": "fld_error",
-        "worker_version": "fld_worker_version",
-        "hermes_run_id": "fld_hermes_run_id",
-        "hermes_agent_id": "fld_hermes_agent_id",
-        "hermes_job_id": "fld_hermes_job_id"
+        "run_id": "<field-run-id>",
+        "pin": "<field-pin>",
+        "action": "<field-action>",
+        "ok": "<field-ok>",
+        "input_snapshot": "<field-input-snapshot>",
+        "output_snapshot": "<field-output-snapshot>",
+        "error": "<field-error>",
+        "worker_version": "<field-worker-version>",
+        "hermes_run_id": "<field-hermes-run-id>",
+        "hermes_agent_id": "<field-hermes-agent-id>",
+        "hermes_job_id": "<field-hermes-job-id>"
       }
     },
     "runtime_locks": {
-      "table_id": "tbl_runtime_locks",
+      "table_id": "<local-runtime-locks-table-id>",
       "fields": {
-        "lock_name": "fld_lock_name",
-        "owner_run_id": "fld_owner_run_id",
-        "owner_hermes_run_id": "fld_owner_hermes_run_id",
-        "lock_expires_at": "fld_lock_expires_at",
-        "locked_at": "fld_locked_at",
-        "last_error": "fld_last_error"
+        "lock_name": "<field-lock-name>",
+        "owner_run_id": "<field-owner-run-id>",
+        "owner_hermes_run_id": "<field-owner-hermes-run-id>",
+        "lock_expires_at": "<field-lock-expires-at>",
+        "locked_at": "<field-locked-at>",
+        "last_error": "<field-lock-last-error>"
       }
     }
   }

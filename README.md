@@ -22,6 +22,24 @@ publish_playwright.js
         -> Hermes agent
 ```
 
+## Public Repo Safety
+
+This repository is public. Never commit Pinterest or Feishu account-specific data.
+
+Keep these local only:
+
+- Pinterest login email, account name, cookies, session state, Chrome profile contents, real board names, and real Pin request JSON.
+- Feishu tenant/app/base/table/field identifiers, app tokens, access tokens, CLI auth state, attachment tokens, exports, and screenshots from logged-in Feishu pages.
+- Any Hermes secret values or local environment files used to connect the worker to live services.
+
+Recommended local-only locations:
+
+- `~/.pinterest-autopin/config.json` and `~/.pinterest-autopin/chrome-profile` for the Pinterest browser profile.
+- `.gstack/feishu-worker-config.json`, `.secrets/feishu-worker-config.json`, or `worker-config.local.json` for real Feishu worker config.
+- `.env` or the Hermes secret store for Feishu access tokens and other credentials.
+
+The committed files under `examples/` are shape examples only. Replace placeholders in a local ignored file before running against real Pinterest or Feishu.
+
 ## Prerequisites
 
 - macOS
@@ -250,10 +268,12 @@ Invoke it as `$pinterest-autopin` in a Hermes-compatible agent. The Skill intent
 The multi-step Feishu workflow uses a separate worker CLI:
 
 ```bash
-python3 tools/feishu_pinterest_worker.py doctor --config /path/to/worker-config.json
-python3 tools/feishu_pinterest_worker.py prepare --config /path/to/worker-config.json --limit 10
-python3 tools/feishu_pinterest_worker.py publish --config /path/to/worker-config.json --limit 1
+python3 tools/feishu_pinterest_worker.py doctor --config .gstack/feishu-worker-config.json
+python3 tools/feishu_pinterest_worker.py prepare --config .gstack/feishu-worker-config.json --limit 10
+python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-config.json --limit 1
 ```
+
+Create the real config by copying `examples/worker-config.example.json` into an ignored local path such as `.gstack/feishu-worker-config.json`. Do not edit the committed example with real Feishu values.
 
 Hermes runs should provide run identity through environment variables such as:
 
@@ -266,7 +286,7 @@ HERMES_JOB_ID
 Local development must opt in explicitly:
 
 ```bash
-python3 tools/feishu_pinterest_worker.py doctor --config /path/to/worker-config.json --local-dev
+python3 tools/feishu_pinterest_worker.py doctor --config .gstack/feishu-worker-config.json --local-dev
 ```
 
 Feishu access is through a CLI boundary only. The worker expects a configurable Feishu CLI binary and JSON output; tests mock this boundary and never call live Feishu, live AI, or live Pinterest. Do not deploy an OpenAI API key for this worker. Model calls belong to the Hermes agent runtime, not the Feishu/Pinterest worker process.

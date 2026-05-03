@@ -3,3 +3,24 @@ node_modules/
 *.log
 dist/
 .gstack/
+
+# Local secrets and account-specific state. This repository is public.
+.env
+.env.*
+!.env.example
+.secrets/
+.local/
+*.local.json
+worker-config.json
+worker-config.local.json
+feishu-worker-config.json
+feishu-worker-config.local.json
+request.local.json
+pinterest-request.local.json
+
+# Local browser/session artifacts.
+.pinterest-autopin/
+chrome-profile/
+pinterest-chrome-profile/
+screenshots/
+qa-artifacts/

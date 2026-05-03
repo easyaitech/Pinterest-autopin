@@ -1,8 +1,8 @@
 {
   "image": "/absolute/path/to/image.jpg",
-  "title": "A calm neutral home decor pin",
-  "board": "Home Decor",
+  "title": "Example Pin Title",
+  "board": "Example Board",
   "link": "https://example.com/product",
-  "description": "Soft neutral textures for a calm and inviting home.",
-  "altText": "Neutral home decor styling with soft textures and warm light."
+  "description": "Example Pin description for local validation.",
+  "altText": "Example accessible image description."
 }

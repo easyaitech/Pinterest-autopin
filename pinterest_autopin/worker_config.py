@@ -54,6 +54,11 @@ class WorkerConfig:
     prepare_limit: int = 10
 
 
+def _placeholder(value: str) -> bool:
+    stripped = value.strip()
+    return stripped.startswith("<") and stripped.endswith(">")
+
+
 def _table(payload: Mapping[str, Any], name: str) -> TableConfig:
     raw = payload.get(name)
     if not isinstance(raw, Mapping):
@@ -107,6 +112,21 @@ def validate_worker_config(config: WorkerConfig) -> list[str]:
     errors: list[str] = []
     if not config.app_token:
         errors.append("app_token is required")
+    elif _placeholder(config.app_token):
+        errors.append("app_token must be replaced in a local ignored config file")
+    for table_name, table in {
+        "brands": config.brands,
+        "pins": config.pins,
+        "runs": config.runs,
+        "runtime_locks": config.runtime_locks,
+    }.items():
+        if _placeholder(table.table_id):
+            errors.append(f"{table_name}.table_id must be replaced in a local ignored config file")
+        for field_name, field_id in table.fields.items():
+            if _placeholder(field_id):
+                errors.append(
+                    f"{table_name}.fields.{field_name} must be replaced in a local ignored config file"
+                )
     required_pin_fields = [
         "status",
         "scheduled_at",

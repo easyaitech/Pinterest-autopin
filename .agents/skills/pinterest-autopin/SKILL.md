@@ -12,6 +12,7 @@ This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_p
 ## Ground rules
 
 - Never ask for or store Pinterest credentials. Use a dedicated Chrome profile and let the user sign in directly inside Chrome if needed.
+- Never write Pinterest account names, real board names, cookies, Chrome profile contents, or real request JSON into this repository. Keep those in local ignored files or temp files only.
 - Do not publish for real unless the user explicitly asks to publish, post, send, or run final mode.
 - If the user asks to preview, test, verify, or prepare, use `test` mode.
 - If required fields are missing for `test` or `final`, ask for the missing values instead of inventing them.
@@ -87,7 +88,7 @@ Default profile resolution order:
 npm install
 ```
 
-2. Write or reuse a request JSON file. `examples/request.json` is only a shape example; replace it with real values or use a temp file.
+2. Write or reuse a request JSON file. `examples/request.json` is only a shape example; replace it with real values in an ignored local file or use a temp file.
 
 3. Validate without opening Chrome:
 

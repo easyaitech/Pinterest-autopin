@@ -51,7 +51,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         return {
             "image": self.make_image(),
             "title": "QA Pin",
-            "board": "Home Decor",
+            "board": "Example Board",
             "link": "https://example.com",
             "description": "Description",
             "altText": "Alt text",
