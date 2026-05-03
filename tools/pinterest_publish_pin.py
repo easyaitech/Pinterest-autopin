@@ -37,9 +37,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", help="Path to the JSON request file.")
     parser.add_argument(
         "--mode",
-        choices=("validate", "test", "final"),
+        choices=("validate", "test", "final", "check-login"),
         default="validate",
-        help="validate only, fill without publishing, or publish for real.",
+        help="validate only, check login, fill without publishing, or publish for real.",
     )
     parser.add_argument("--image", help="Absolute path to the image file.")
     parser.add_argument("--title", help="Pin title.")
@@ -258,16 +258,17 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     if errors:
         return errors, warnings
 
-    image_path = Path(payload["image"])
-    if not payload["image"].strip():
-        errors.append("image is required")
-    elif not image_path.is_absolute():
-        errors.append(f"image must be an absolute path: {payload['image']}")
-    elif not image_path.exists():
-        errors.append(f"image does not exist: {payload['image']}")
+    if mode != "check-login":
+        image_path = Path(payload["image"])
+        if not payload["image"].strip():
+            errors.append("image is required")
+        elif not image_path.is_absolute():
+            errors.append(f"image must be an absolute path: {payload['image']}")
+        elif not image_path.exists():
+            errors.append(f"image does not exist: {payload['image']}")
 
-    if not payload["title"].strip():
-        errors.append("title is required")
+        if not payload["title"].strip():
+            errors.append("title is required")
 
     if payload["link"].strip():
         parsed_link = urlparse(payload["link"])
@@ -288,18 +289,18 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     if not checks["sipsPath"]:
         warnings.append("sips not found; image compression will fail on macOS-only path")
 
-    if not payload["board"].strip():
+    if mode != "check-login" and not payload["board"].strip():
         if mode in {"test", "final"}:
             errors.append("board is required in test/final mode to avoid posting to the wrong board")
         else:
             warnings.append("board is empty; validate mode allows this, but real execution requires it")
 
-    if mode in {"test", "final"}:
+    if mode in {"test", "final", "check-login"}:
         if not checks["playwrightInstalled"]:
             errors.append("playwright dependency is not installed; run npm install first")
         if not chrome_profile and not checks["chromeCdp"]["reachable"]:
             errors.append(
-                "chromeProfile is required in test/final mode unless an existing "
+                "chromeProfile is required in test/final/check-login mode unless an existing "
                 "Chrome CDP session is reachable"
             )
 
@@ -359,7 +360,10 @@ def run_publish(payload: dict[str, Any], mode: str, timeout: int) -> dict[str, A
         ]
         if payload["chromeProfile"]:
             command.extend(["--chrome-profile", payload["chromeProfile"]])
-        command.append("--final" if mode == "final" else "--test")
+        if mode == "check-login":
+            command.append("--check-login")
+        else:
+            command.append("--final" if mode == "final" else "--test")
 
         completed = subprocess.run(
             command,

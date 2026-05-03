@@ -157,6 +157,18 @@ or:
 npm run pin:test -- --input examples/request.json
 ```
 
+Check the Pinterest login state without uploading an image or changing a Pin:
+
+```bash
+python3 tools/pinterest_publish_pin.py --mode check-login
+```
+
+or:
+
+```bash
+npm run pin:check-login
+```
+
 Publish for real:
 
 ```bash
@@ -206,6 +218,7 @@ The Python tool prints JSON to stdout. On success, it includes:
 ## Notes
 
 - `--mode validate` never opens Chrome or touches Pinterest.
+- `--mode check-login` opens the Pin builder only to confirm the profile is logged in. It does not upload, fill, or publish.
 - `--mode test` opens the pin builder and fills the form, but does not publish.
 - `board` is required in `test` and `final` mode. There is no silent default board.
 - `image` must be an absolute path. `link`, when present, must be an absolute `http` or `https` URL.
@@ -230,3 +243,50 @@ The project-level Skill lives at:
 ```
 
 Invoke it as `$pinterest-autopin` in a Hermes-compatible agent. The Skill intentionally wraps `tools/pinterest_publish_pin.py` instead of duplicating browser automation logic.
+
+## Feishu Workflow Worker
+
+The multi-step Feishu workflow uses a separate worker CLI:
+
+```bash
+python3 tools/feishu_pinterest_worker.py doctor --config /path/to/worker-config.json
+python3 tools/feishu_pinterest_worker.py prepare --config /path/to/worker-config.json --limit 10
+python3 tools/feishu_pinterest_worker.py publish --config /path/to/worker-config.json --limit 1
+```
+
+Hermes runs should provide run identity through environment variables such as:
+
+```text
+HERMES_RUN_ID
+HERMES_AGENT_ID
+HERMES_JOB_ID
+```
+
+Local development must opt in explicitly:
+
+```bash
+python3 tools/feishu_pinterest_worker.py doctor --config /path/to/worker-config.json --local-dev
+```
+
+Feishu access is through a CLI boundary only. The worker expects a configurable Feishu CLI binary and JSON output; tests mock this boundary and never call live Feishu, live AI, or live Pinterest.
+
+The Feishu CLI boundary must support:
+
+- paginated `bitable records list` with `has_more` and `page_token` JSON fields
+- atomic `bitable records compare-update` for runtime locks
+- `bitable attachments download` and `bitable attachments upload`
+
+`prepare` claims ready rows, downloads `source_image`, writes draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
+
+Publish safety order:
+
+```text
+Hermes run identity
+  -> atomic Feishu runtime_locks[pinterest_profile_publish]
+  -> Pinterest check-login
+  -> scan approved due Pins across pages
+  -> claim one Pin and increment publish_attempts
+  -> download final_image attachment
+  -> final publish
+  -> Feishu writeback
+```

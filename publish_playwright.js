@@ -125,6 +125,64 @@ function randomDelay(min = 2, max = 5) {
   return new Promise(resolve => setTimeout(resolve, (Math.floor(Math.random() * (max - min + 1)) + min) * 1000));
 }
 
+async function checkPinterestLogin(chromeProfile) {
+  let browserSession;
+
+  console.log('='.repeat(60));
+  console.log('Pinterest AutoPin - Login Check');
+  console.log('='.repeat(60));
+
+  try {
+    browserSession = await createBrowserSession(chromeProfile);
+    const page = await browserSession.context.newPage();
+    await page.goto('https://www.pinterest.com/pin-builder/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    }).catch((e) => {
+      logWarn(`导航超时，尝试继续: ${e.message}`);
+    });
+    await page.waitForTimeout(2000);
+
+    const state = await page.evaluate(() => {
+      const bodyText = document.body?.innerText || '';
+      const url = window.location.href;
+      const loginWall =
+        /\/login/i.test(url) ||
+        /log in|sign up|登录|注册/i.test(bodyText);
+      const hasCreateSurface = Boolean(
+        document.querySelector('input[type="file"]') ||
+        document.querySelector('textarea[placeholder="Add your title"]') ||
+        document.querySelector('textarea[data-test-id="pin-draft-title"]') ||
+        document.querySelector('[data-test-id*="media"]')
+      );
+      return { url, loginWall, hasCreateSurface };
+    });
+
+    if (state.loginWall || !state.hasCreateSurface) {
+      const reason = state.loginWall
+        ? `Pinterest login required at ${state.url}`
+        : `Pinterest create surface not detected at ${state.url}`;
+      throw new Error(reason);
+    }
+
+    const result = {
+      ok: true,
+      mode: 'check-login',
+      finalUrl: state.url,
+      completedAt: new Date().toISOString()
+    };
+    logInfo('✅ Pinterest 登录态可用');
+    writeStructuredResult(RESULT_JSON_PATH, result);
+    return result;
+  } finally {
+    if (browserSession) {
+      await browserSession.close().catch((e) => {
+        logWarn(`关闭浏览器连接失败: ${e.message}`);
+      });
+    }
+  }
+}
+
 // 压缩图片到最大宽度
 function compressImage(imagePath, maxWidth = 2000) {
   try {
@@ -671,6 +729,7 @@ if (!pinData && args.data) {
 
 const TEST_MODE = args.test || false;
 const FINAL_MODE = args.final || false;
+const CHECK_LOGIN_MODE = args['check-login'] || args.checkLogin || false;
 const RESULT_JSON_PATH = args['result-json'] || '';
 
 if (TEST_MODE) {
@@ -690,7 +749,18 @@ const description = pinData?.description || args.description || '';
 const altText = pinData?.altText || pinData?.alt_text || args['alt-text'] || '';
 const chromeProfile = pinData?.chromeProfile || pinData?.chrome_profile || args['chrome-profile'] || args.chromeProfile || '';
 
-if (!image || !title) {
+if (CHECK_LOGIN_MODE) {
+  checkPinterestLogin(chromeProfile).catch(err => {
+    logError(`错误: ${err.message}`);
+    writeStructuredResult(RESULT_JSON_PATH, {
+      ok: false,
+      mode: 'check-login',
+      error: err.message,
+      completedAt: new Date().toISOString()
+    });
+    process.exit(1);
+  });
+} else if (!image || !title) {
   logError('缺少参数: --image, --title');
   console.log('\n用法:');
   console.log('  命令行: node publish_playwright.js --image <图片> --title <标题> --description <描述> --final');
@@ -703,9 +773,7 @@ if (!image || !title) {
     completedAt: new Date().toISOString()
   });
   process.exit(1);
-}
-
-if ((TEST_MODE || FINAL_MODE) && !board) {
+} else if ((TEST_MODE || FINAL_MODE) && !board) {
   logError('缺少参数: --board');
   writeStructuredResult(RESULT_JSON_PATH, {
     ok: false,
@@ -717,26 +785,26 @@ if ((TEST_MODE || FINAL_MODE) && !board) {
     completedAt: new Date().toISOString()
   });
   process.exit(1);
-}
-
-publishPin({
-  image: image,
-  title: title,
-  board: board,
-  link: link,
-  description: description,
-  altText: altText,
-  chromeProfile: chromeProfile
-}).catch(err => {
-  logError(`错误: ${err.message}`);
-  writeStructuredResult(RESULT_JSON_PATH, {
-    ok: false,
-    error: err.message,
-    image,
-    title,
-    board,
-    link,
-    completedAt: new Date().toISOString()
+} else {
+  publishPin({
+    image: image,
+    title: title,
+    board: board,
+    link: link,
+    description: description,
+    altText: altText,
+    chromeProfile: chromeProfile
+  }).catch(err => {
+    logError(`错误: ${err.message}`);
+    writeStructuredResult(RESULT_JSON_PATH, {
+      ok: false,
+      error: err.message,
+      image,
+      title,
+      board,
+      link,
+      completedAt: new Date().toISOString()
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+}

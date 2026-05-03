@@ -127,7 +127,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         )
 
         self.assertIn(
-            "chromeProfile is required in test/final mode unless an existing "
+            "chromeProfile is required in test/final/check-login mode unless an existing "
             "Chrome CDP session is reachable",
             errors,
         )

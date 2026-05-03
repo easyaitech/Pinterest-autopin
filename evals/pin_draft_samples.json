@@ -1,0 +1,27 @@
+[
+  {
+    "product_name": "Ceramic Table Lamp",
+    "product_link": "https://example.com/lamp",
+    "expected_facts": ["ceramic", "table lamp"]
+  },
+  {
+    "product_name": "Oak Floating Shelf",
+    "product_link": "https://example.com/shelf",
+    "expected_facts": ["oak", "shelf"]
+  },
+  {
+    "product_name": "Linen Cushion Cover",
+    "product_link": "https://example.com/cushion",
+    "expected_facts": ["linen", "cushion"]
+  },
+  {
+    "product_name": "Glass Storage Jar",
+    "product_link": "https://example.com/jar",
+    "expected_facts": ["glass", "jar"]
+  },
+  {
+    "product_name": "Minimal Wall Clock",
+    "product_link": "https://example.com/clock",
+    "expected_facts": ["wall clock"]
+  }
+]
