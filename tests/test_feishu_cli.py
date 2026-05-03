@@ -128,6 +128,33 @@ class FeishuCliTest(unittest.TestCase):
         self.assertIn("2", second_command)
 
     @patch("pinterest_autopin.feishu_cli.subprocess.run")
+    def test_lark_list_records_normalizes_table_shaped_output(self, run_mock) -> None:
+        run_mock.return_value = subprocess.CompletedProcess(
+            ["lark-cli"],
+            0,
+            stdout=json.dumps(
+                {
+                    "data": {
+                        "data": [["NO.001", ["pinterest_profile_publish"]]],
+                        "field_id_list": ["fld_auto", "fld_lock_name"],
+                        "fields": ["ID", "lock_name"],
+                        "record_id_list": ["rec-1"],
+                        "has_more": False,
+                    }
+                }
+            ),
+            stderr="",
+        )
+
+        records = FeishuCli(binary="lark-cli", app_token="app", retries=0).list_records(
+            "tbl", filter_expr='fld_lock_name="pinterest_profile_publish"', page_size=20
+        )
+
+        self.assertEqual("rec-1", records[0]["record_id"])
+        self.assertEqual("pinterest_profile_publish", records[0]["fields"]["fld_lock_name"])
+        self.assertEqual("pinterest_profile_publish", records[0]["fields"]["lock_name"])
+
+    @patch("pinterest_autopin.feishu_cli.subprocess.run")
     def test_lark_update_uses_record_upsert(self, run_mock) -> None:
         run_mock.return_value = subprocess.CompletedProcess(["lark-cli"], 0, stdout='{"record_id": "1"}', stderr="")
 
@@ -170,6 +197,9 @@ class FeishuCliTest(unittest.TestCase):
         self.assertIn("+record-upload-attachment", command)
         self.assertIn("--field-id", command)
         self.assertIn("fld_file", command)
+        self.assertIn("image.png", command)
+        self.assertNotIn("/tmp/image.png", command)
+        self.assertEqual("/tmp", str(run_mock.call_args.kwargs["cwd"]))
 
     @patch("pinterest_autopin.feishu_cli.subprocess.run")
     def test_lark_download_uses_drive_download(self, run_mock) -> None:
@@ -180,9 +210,12 @@ class FeishuCliTest(unittest.TestCase):
         )
 
         command = run_mock.call_args.args[0]
-        self.assertIn("+download", command)
-        self.assertIn("--file-token", command)
-        self.assertIn("token-1", command)
+        self.assertIn("api", command)
+        self.assertIn("GET", command)
+        self.assertIn("/open-apis/drive/v1/medias/token-1/download", command)
+        self.assertIn("out.png", command)
+        self.assertNotIn("/tmp/out.png", command)
+        self.assertEqual("/tmp", str(run_mock.call_args.kwargs["cwd"]))
 
 
 if __name__ == "__main__":

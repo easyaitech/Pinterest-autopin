@@ -42,7 +42,13 @@ class FeishuCli:
             return "lark"
         return "bitable"
 
-    def run_json(self, args: Sequence[str], *, retryable: bool = True) -> dict[str, Any]:
+    def run_json(
+        self,
+        args: Sequence[str],
+        *,
+        retryable: bool = True,
+        cwd: str | Path | None = None,
+    ) -> dict[str, Any]:
         command = [self.binary, *args]
         attempt = 0
         while True:
@@ -53,6 +59,7 @@ class FeishuCli:
                 text=True,
                 timeout=self.timeout,
                 check=False,
+                cwd=str(cwd) if cwd else None,
             )
             if completed.returncode == 0:
                 try:
@@ -202,15 +209,17 @@ class FeishuCli:
 
     def upload_attachment(self, file_path: str) -> str:
         if self.resolved_flavor == "lark":
+            file_arg, cwd = _local_file_arg(file_path)
             payload = self.run_json(
                 [
                     "drive",
                     "+upload",
                     "--file",
-                    file_path,
+                    file_arg,
                     "--name",
                     Path(file_path).name,
-                ]
+                ],
+                cwd=cwd,
             )
             token = _file_token_from_payload(payload)
             if not token:
@@ -231,6 +240,7 @@ class FeishuCli:
     ) -> str:
         if self.resolved_flavor != "lark":
             return self.upload_attachment(file_path)
+        file_arg, cwd = _local_file_arg(file_path)
         payload = self.run_json(
             [
                 "base",
@@ -244,10 +254,11 @@ class FeishuCli:
                 "--field-id",
                 field_id,
                 "--file",
-                file_path,
+                file_arg,
                 "--name",
                 Path(file_path).name,
-            ]
+            ],
+            cwd=cwd,
         )
         token = _file_token_from_payload(payload)
         if not token:
@@ -256,16 +267,16 @@ class FeishuCli:
 
     def download_attachment(self, file_token: str, output_path: str) -> str:
         if self.resolved_flavor == "lark":
+            output_arg, cwd = _local_file_arg(output_path)
             self.run_json(
                 [
-                    "drive",
-                    "+download",
-                    "--file-token",
-                    file_token,
+                    "api",
+                    "GET",
+                    f"/open-apis/drive/v1/medias/{file_token}/download",
                     "--output",
-                    output_path,
-                    "--overwrite",
-                ]
+                    output_arg,
+                ],
+                cwd=cwd,
             )
             return output_path
         self.run_json(
@@ -328,6 +339,18 @@ def _data(payload: dict[str, Any]) -> dict[str, Any]:
 def _records_from_payload(payload: dict[str, Any]) -> list[Any]:
     data = _data(payload)
     records = data.get("records", data.get("items", []))
+    if isinstance(records, list) and records:
+        return records
+    table_rows = data.get("data")
+    field_ids = data.get("field_id_list")
+    field_names = data.get("fields")
+    record_ids = data.get("record_id_list") or []
+    if isinstance(table_rows, list) and isinstance(field_ids, list):
+        return [
+            _record_from_table_row(row, field_ids, field_names, record_ids, index)
+            for index, row in enumerate(table_rows)
+            if isinstance(row, list)
+        ]
     if not isinstance(records, list):
         raise FeishuCliError("Feishu CLI records payload must contain a records/items list")
     return records
@@ -338,6 +361,29 @@ def _next_page_token(payload: dict[str, Any]) -> str:
     if not data.get("has_more"):
         return ""
     return str(data.get("page_token") or data.get("next_page_token") or "").strip()
+
+
+def _record_from_table_row(
+    row: list[Any],
+    field_ids: list[Any],
+    field_names: Any,
+    record_ids: list[Any],
+    index: int,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for field_id, value in zip(field_ids, row):
+        fields[str(field_id)] = _normalize_cell_value(value)
+    if isinstance(field_names, list):
+        for name, value in zip(field_names, row):
+            fields[str(name)] = _normalize_cell_value(value)
+    record_id = str(record_ids[index]) if index < len(record_ids) else ""
+    return {"record_id": record_id, "id": record_id, "fields": fields}
+
+
+def _normalize_cell_value(value: Any) -> Any:
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], (str, int, float, bool)):
+        return value[0]
+    return value
 
 
 def _has_more(payload: dict[str, Any], *, raw_count: int, page_size: int) -> bool:
@@ -403,3 +449,10 @@ def _file_token_from_payload(payload: dict[str, Any]) -> str:
                     if token:
                         return token
     return ""
+
+
+def _local_file_arg(file_path: str | Path) -> tuple[str, Path | None]:
+    path = Path(file_path)
+    if path.is_absolute():
+        return path.name, path.parent
+    return str(path), None
