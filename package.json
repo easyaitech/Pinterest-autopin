@@ -7,7 +7,8 @@
     "pinterest-autopin": "./tools/pinterest_publish_pin.py"
   },
   "scripts": {
-    "check": "node --check publish_playwright.js && python3 -m py_compile tools/pinterest_publish_pin.py",
+    "check": "node --check publish_playwright.js && python3 -m py_compile tools/pinterest_publish_pin.py && npm test",
+    "test": "python3 -m unittest discover -s tests",
     "pin:validate": "python3 tools/pinterest_publish_pin.py --mode validate",
     "pin:test": "python3 tools/pinterest_publish_pin.py --mode test",
     "pin:publish": "python3 tools/pinterest_publish_pin.py --mode final"

@@ -58,6 +58,8 @@ Optional:
 - `description`
 - `altText`
 
+`link`, when present, must be an absolute `http` or `https` URL.
+
 ## Workflow
 
 1. Ensure dependencies are present:

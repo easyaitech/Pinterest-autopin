@@ -104,6 +104,7 @@ The Python tool prints JSON to stdout. On success, it includes:
 - `--mode validate` never opens Chrome or touches Pinterest.
 - `--mode test` opens the pin builder and fills the form, but does not publish.
 - `board` is required in `test` and `final` mode. There is no silent default board.
+- `image` must be an absolute path. `link`, when present, must be an absolute `http` or `https` URL.
 - `publish_playwright.js` now supports:
   - `--input <json-file>`
   - `--data <inline-json-or-file>`

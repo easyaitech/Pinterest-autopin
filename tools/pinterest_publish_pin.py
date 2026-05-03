@@ -14,12 +14,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NODE_SCRIPT = REPO_ROOT / "publish_playwright.js"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PIN_URL_RE = re.compile(r"https?://(?:www\.)?pinterest\.com/pin/[^\s\"'<>]+")
+TEXT_FIELDS = ("image", "title", "board", "link", "description", "altText")
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,12 +81,12 @@ def normalize_payload(file_payload: dict[str, Any], args: argparse.Namespace) ->
         alt_text = payload.get("alt-text")
 
     normalized = {
-        "image": payload.get("image") or "",
-        "title": payload.get("title") or "",
-        "board": payload.get("board") or "",
-        "link": payload.get("link") or "",
-        "description": payload.get("description") or "",
-        "altText": alt_text or "",
+        "image": payload.get("image", ""),
+        "title": payload.get("title", ""),
+        "board": payload.get("board", ""),
+        "link": payload.get("link", ""),
+        "description": payload.get("description", ""),
+        "altText": "" if alt_text is None else alt_text,
     }
     return normalized
 
@@ -125,13 +127,28 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     errors: list[str] = []
     warnings: list[str] = []
 
-    if not payload["image"]:
+    for field in TEXT_FIELDS:
+        if not isinstance(payload[field], str):
+            errors.append(f"{field} must be a string")
+
+    if errors:
+        return errors, warnings
+
+    image_path = Path(payload["image"])
+    if not payload["image"].strip():
         errors.append("image is required")
-    elif not Path(payload["image"]).exists():
+    elif not image_path.is_absolute():
+        errors.append(f"image must be an absolute path: {payload['image']}")
+    elif not image_path.exists():
         errors.append(f"image does not exist: {payload['image']}")
 
-    if not payload["title"]:
+    if not payload["title"].strip():
         errors.append("title is required")
+
+    if payload["link"].strip():
+        parsed_link = urlparse(payload["link"])
+        if parsed_link.scheme not in {"http", "https"} or not parsed_link.netloc:
+            errors.append(f"link must be an absolute http(s) URL: {payload['link']}")
 
     if not checks["nodeScriptExists"]:
         errors.append(f"publish script not found: {NODE_SCRIPT}")
@@ -142,7 +159,7 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     if not checks["sipsPath"]:
         warnings.append("sips not found; image compression will fail on macOS-only path")
 
-    if not payload["board"]:
+    if not payload["board"].strip():
         if mode in {"test", "final"}:
             errors.append("board is required in test/final mode to avoid posting to the wrong board")
         else:
