@@ -324,6 +324,15 @@ def find_pin_url(result_payload: dict[str, Any] | None, stdout: str) -> str:
     return match.group(0) if match else ""
 
 
+def execution_error_message(execution: dict[str, Any]) -> str:
+    result = execution.get("result")
+    if isinstance(result, dict):
+        error = str(result.get("error") or "").strip()
+        if error:
+            return error
+    return "publish command failed"
+
+
 def save_chrome_profile_config(chrome_profile: str) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     config_payload: dict[str, Any] = {}
@@ -471,7 +480,7 @@ def main() -> int:
 
     response.update(execution)
     if not execution["ok"]:
-        response["errors"].append("publish command failed")
+        response["errors"].append(execution_error_message(execution))
     return print_json(response, 0 if execution["ok"] else 1)
 
 

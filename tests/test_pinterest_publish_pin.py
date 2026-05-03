@@ -261,6 +261,21 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
         self.assertEqual({"chromeProfile": str(profile_dir)}, config_payload)
 
+    def test_execution_error_uses_nested_result_error(self) -> None:
+        # Regression: worker publish should surface the actionable Pinterest login
+        # reason instead of only "publish command failed".
+        # Found by manual staged testing on 2026-05-03.
+        message = pinterest_publish_pin.execution_error_message(
+            {
+                "ok": False,
+                "result": {
+                    "error": "Pinterest login required at https://www.pinterest.com/",
+                },
+            }
+        )
+
+        self.assertEqual("Pinterest login required at https://www.pinterest.com/", message)
+
 
 if __name__ == "__main__":
     unittest.main()
