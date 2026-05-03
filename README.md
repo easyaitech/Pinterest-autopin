@@ -26,9 +26,36 @@ publish_playwright.js
 
 - macOS
 - Node.js
-- Google Chrome already logged into Pinterest
-- Chrome running with CDP on port `9222`
+- Google Chrome
+- A dedicated Chrome profile directory for Pinterest AutoPin
 - `npm install`
+
+## Chrome Profile
+
+Pinterest AutoPin no longer requires Chrome to be pre-launched with CDP on port `9222`.
+Create a dedicated Chrome profile directory and pass it to the CLI or agent:
+
+```bash
+mkdir -p "$HOME/.pinterest-autopin/chrome-profile"
+```
+
+First run `test` mode with that profile, sign in to Pinterest if Chrome asks, then re-run the command:
+
+```bash
+npm run pin:test -- \
+  --input examples/request.json \
+  --chrome-profile "$HOME/.pinterest-autopin/chrome-profile"
+```
+
+For JSON-based agent calls, include:
+
+```json
+{
+  "chromeProfile": "/absolute/path/to/chrome-profile"
+}
+```
+
+An already running Chrome CDP session on port `9222` is still supported as a legacy fallback, but it is no longer the recommended setup.
 
 ## Install From GitHub
 
@@ -91,25 +118,31 @@ npm run pin:validate -- --input examples/request.json
 Fill the form without clicking Publish:
 
 ```bash
-python3 tools/pinterest_publish_pin.py --input examples/request.json --mode test
+python3 tools/pinterest_publish_pin.py \
+  --input examples/request.json \
+  --mode test \
+  --chrome-profile "$HOME/.pinterest-autopin/chrome-profile"
 ```
 
 or:
 
 ```bash
-npm run pin:test -- --input examples/request.json
+npm run pin:test -- --input examples/request.json --chrome-profile "$HOME/.pinterest-autopin/chrome-profile"
 ```
 
 Publish for real:
 
 ```bash
-python3 tools/pinterest_publish_pin.py --input examples/request.json --mode final
+python3 tools/pinterest_publish_pin.py \
+  --input examples/request.json \
+  --mode final \
+  --chrome-profile "$HOME/.pinterest-autopin/chrome-profile"
 ```
 
 or:
 
 ```bash
-npm run pin:publish -- --input examples/request.json
+npm run pin:publish -- --input examples/request.json --chrome-profile "$HOME/.pinterest-autopin/chrome-profile"
 ```
 
 ## Input shape
@@ -121,7 +154,8 @@ npm run pin:publish -- --input examples/request.json
   "board": "Board Name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description"
+  "altText": "Accessible image description",
+  "chromeProfile": "/absolute/path/to/chrome-profile"
 }
 ```
 
@@ -142,10 +176,12 @@ The Python tool prints JSON to stdout. On success, it includes:
 - `--mode test` opens the pin builder and fills the form, but does not publish.
 - `board` is required in `test` and `final` mode. There is no silent default board.
 - `image` must be an absolute path. `link`, when present, must be an absolute `http` or `https` URL.
+- `chromeProfile` is recommended for `test` and `final` mode. If it does not exist, it will be created.
 - `publish_playwright.js` now supports:
   - `--input <json-file>`
   - `--data <inline-json-or-file>`
   - `--result-json <json-file>`
+  - `--chrome-profile <profile-dir>`
 
 ## Example request
 

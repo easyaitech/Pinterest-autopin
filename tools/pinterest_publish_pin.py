@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 NODE_SCRIPT = REPO_ROOT / "publish_playwright.js"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PIN_URL_RE = re.compile(r"https?://(?:www\.)?pinterest\.com/pin/[^\s\"'<>]+")
-TEXT_FIELDS = ("image", "title", "board", "link", "description", "altText")
+TEXT_FIELDS = ("image", "title", "board", "link", "description", "altText", "chromeProfile")
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--link", help="Destination link.")
     parser.add_argument("--description", help="Pin description.")
     parser.add_argument("--alt-text", dest="alt_text", help="Alt text.")
+    parser.add_argument(
+        "--chrome-profile",
+        dest="chrome_profile",
+        help="Absolute path to a dedicated Chrome user data directory.",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
@@ -69,6 +74,7 @@ def normalize_payload(file_payload: dict[str, Any], args: argparse.Namespace) ->
         "link": args.link,
         "description": args.description,
         "altText": args.alt_text,
+        "chromeProfile": args.chrome_profile,
     }
     for key, value in overrides.items():
         if value is not None:
@@ -80,6 +86,12 @@ def normalize_payload(file_payload: dict[str, Any], args: argparse.Namespace) ->
     if alt_text is None:
         alt_text = payload.get("alt-text")
 
+    chrome_profile = payload.get("chromeProfile")
+    if chrome_profile is None:
+        chrome_profile = payload.get("chrome_profile")
+    if chrome_profile is None:
+        chrome_profile = payload.get("chrome-profile")
+
     normalized = {
         "image": payload.get("image", ""),
         "title": payload.get("title", ""),
@@ -87,6 +99,7 @@ def normalize_payload(file_payload: dict[str, Any], args: argparse.Namespace) ->
         "link": payload.get("link", ""),
         "description": payload.get("description", ""),
         "altText": "" if alt_text is None else alt_text,
+        "chromeProfile": "" if chrome_profile is None else chrome_profile,
     }
     return normalized
 
@@ -150,6 +163,19 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
         if parsed_link.scheme not in {"http", "https"} or not parsed_link.netloc:
             errors.append(f"link must be an absolute http(s) URL: {payload['link']}")
 
+    chrome_profile = payload["chromeProfile"].strip()
+    if chrome_profile:
+        chrome_profile_path = Path(chrome_profile)
+        if not chrome_profile_path.is_absolute():
+            errors.append(f"chromeProfile must be an absolute path: {chrome_profile}")
+        elif chrome_profile_path.exists() and not chrome_profile_path.is_dir():
+            errors.append(f"chromeProfile must be a directory: {chrome_profile}")
+        elif not chrome_profile_path.exists():
+            warnings.append(
+                "chromeProfile directory does not exist yet; it will be created, "
+                "but Pinterest login may be required"
+            )
+
     if not checks["nodeScriptExists"]:
         errors.append(f"publish script not found: {NODE_SCRIPT}")
 
@@ -168,8 +194,11 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     if mode in {"test", "final"}:
         if not checks["playwrightInstalled"]:
             errors.append("playwright dependency is not installed; run npm install first")
-        if not checks["chromeCdp"]["reachable"]:
-            errors.append("Chrome CDP is not reachable at http://127.0.0.1:9222/json/version")
+        if not chrome_profile and not checks["chromeCdp"]["reachable"]:
+            errors.append(
+                "chromeProfile is required in test/final mode unless an existing "
+                "Chrome CDP session is reachable"
+            )
 
     return errors, warnings
 
@@ -206,6 +235,8 @@ def run_publish(payload: dict[str, Any], mode: str, timeout: int) -> dict[str, A
             "--result-json",
             str(result_path),
         ]
+        if payload["chromeProfile"]:
+            command.extend(["--chrome-profile", payload["chromeProfile"]])
         command.append("--final" if mode == "final" else "--test")
 
         completed = subprocess.run(

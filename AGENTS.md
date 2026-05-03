@@ -13,5 +13,6 @@
 ## Local Requirements
 
 - Run `npm install` before using test or final mode.
-- Chrome must already be logged into Pinterest and running with CDP on port `9222`.
+- Use a dedicated Chrome profile directory for test or final mode, for example `$HOME/.pinterest-autopin/chrome-profile`.
+- If the profile is not logged into Pinterest yet, let the user sign in directly inside Chrome.
 - Use `python3 tools/pinterest_publish_pin.py` as the stable CLI entrypoint.

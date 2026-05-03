@@ -12,6 +12,9 @@ const path = require('path');
 
 // 配置
 const CDP_PORT = 9222;
+const DEFAULT_CHROME_ARGS = [
+  '--disable-blink-features=AutomationControlled'
+];
 
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
@@ -82,6 +85,42 @@ async function resolveBrowserWsUrl() {
   return payload.webSocketDebuggerUrl;
 }
 
+async function createBrowserSession(chromeProfile) {
+  if (chromeProfile) {
+    const userDataDir = path.resolve(chromeProfile);
+    fs.mkdirSync(userDataDir, { recursive: true });
+    logInfo(`🔗 使用 Chrome profile: ${userDataDir}`);
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      channel: 'chrome',
+      headless: false,
+      viewport: null,
+      args: DEFAULT_CHROME_ARGS
+    });
+    return {
+      context,
+      pageCount: () => context.pages().length,
+      close: () => context.close()
+    };
+  }
+
+  logInfo(`🔗 未提供 Chrome profile，尝试连接本地 CDP ${CDP_PORT}...`);
+  const browserWsUrl = await resolveBrowserWsUrl();
+  const browser = await chromium.connectOverCDP({
+    wsEndpoint: browserWsUrl
+  });
+  const contexts = browser.contexts();
+  const context = contexts[0];
+  if (!context) {
+    await browser.close().catch(() => {});
+    throw new Error('CDP Chrome 未返回可用浏览器上下文');
+  }
+  return {
+    context,
+    pageCount: () => context.pages().length,
+    close: () => browser.close()
+  };
+}
+
 function randomDelay(min = 2, max = 5) {
   return new Promise(resolve => setTimeout(resolve, (Math.floor(Math.random() * (max - min + 1)) + min) * 1000));
 }
@@ -125,8 +164,8 @@ function compressImage(imagePath, maxWidth = 2000) {
 }
 
 async function publishPin(options) {
-  const { image, title, board, link, description, altText } = options;
-  let browser;
+  const { image, title, board, link, description, altText, chromeProfile } = options;
+  let browserSession;
   
   console.log('='.repeat(60));
   console.log('Pinterest AutoPin - Playwright');
@@ -147,21 +186,17 @@ async function publishPin(options) {
   // 压缩图片
   const compressedImage = compressImage(image, 2000);
   
-  logInfo(`🔗 连接到 Chrome...`);
+  logInfo(`🔗 打开 Chrome...`);
   
   try {
-    const browserWsUrl = await resolveBrowserWsUrl();
-    browser = await chromium.connectOverCDP({
-      wsEndpoint: browserWsUrl
-    });
+    browserSession = await createBrowserSession(chromeProfile);
 
     logInfo('✅ 已连接');
 
     // 创建新页面（每次都打开全新的 Pin Builder）
-    const contexts = Array.from(browser._contexts || []);
-    const ctx = contexts[0];
+    const ctx = browserSession.context;
 
-    logInfo(`当前 ${ctx._pages.size} 个页面`);
+    logInfo(`当前 ${browserSession.pageCount()} 个页面`);
 
     // 创建全新标签页
     logInfo('📍 创建新标签页...');
@@ -580,8 +615,8 @@ async function publishPin(options) {
     writeStructuredResult(RESULT_JSON_PATH, result);
     return result;
   } finally {
-    if (browser) {
-      await browser.close().catch((e) => {
+    if (browserSession) {
+      await browserSession.close().catch((e) => {
         logWarn(`关闭浏览器连接失败: ${e.message}`);
       });
     }
@@ -653,6 +688,7 @@ const board = pinData?.board || args.board || '';
 const link = pinData?.link || args.link || '';
 const description = pinData?.description || args.description || '';
 const altText = pinData?.altText || pinData?.alt_text || args['alt-text'] || '';
+const chromeProfile = pinData?.chromeProfile || pinData?.chrome_profile || args['chrome-profile'] || args.chromeProfile || '';
 
 if (!image || !title) {
   logError('缺少参数: --image, --title');
@@ -689,7 +725,8 @@ publishPin({
   board: board,
   link: link,
   description: description,
-  altText: altText
+  altText: altText,
+  chromeProfile: chromeProfile
 }).catch(err => {
   logError(`错误: ${err.message}`);
   writeStructuredResult(RESULT_JSON_PATH, {

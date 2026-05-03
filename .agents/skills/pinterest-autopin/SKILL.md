@@ -1,6 +1,6 @@
 ---
 name: pinterest-autopin
-description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository, including preparing the request JSON, checking Chrome CDP readiness, running dry-run form fill, and doing a real publish only when explicitly requested.
+description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository, including preparing the request JSON, using a dedicated Chrome profile, running dry-run form fill, and doing a real publish only when explicitly requested.
 ---
 
 # Pinterest AutoPin
@@ -11,7 +11,7 @@ This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_p
 
 ## Ground rules
 
-- Never ask for or store Pinterest credentials. The user must already be logged into Pinterest in Chrome.
+- Never ask for or store Pinterest credentials. Use a dedicated Chrome profile and let the user sign in directly inside Chrome if needed.
 - Do not publish for real unless the user explicitly asks to publish, post, send, or run final mode.
 - If the user asks to preview, test, verify, or prepare, use `test` mode.
 - If required fields are missing for `test` or `final`, ask for the missing values instead of inventing them.
@@ -51,7 +51,8 @@ Prepare a JSON object with this shape:
   "board": "Pinterest board name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description"
+  "altText": "Accessible image description",
+  "chromeProfile": "/absolute/path/to/chrome-profile"
 }
 ```
 
@@ -66,8 +67,10 @@ Optional:
 - `link`
 - `description`
 - `altText`
+- `chromeProfile`, recommended for `test` and `final` mode
 
 `link`, when present, must be an absolute `http` or `https` URL.
+`chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it does not exist yet, the tool will create it, but Pinterest login may be required.
 
 ## Workflow
 
@@ -85,18 +88,30 @@ npm install
 python3 tools/pinterest_publish_pin.py --input /path/to/request.json --mode validate
 ```
 
-4. If validation reports missing dependencies, fix them if safe. If it reports Chrome CDP unavailable, tell the user Chrome must be running with remote debugging on port `9222` and already logged into Pinterest.
+4. If validation reports missing dependencies, fix them if safe. For `test` and `final`, prefer a dedicated Chrome profile:
+
+```bash
+mkdir -p "$HOME/.pinterest-autopin/chrome-profile"
+```
+
+If the user has not provided one, ask for the profile path instead of requiring Chrome CDP.
 
 5. For a preview that fills the Pinterest form but does not publish:
 
 ```bash
-python3 tools/pinterest_publish_pin.py --input /path/to/request.json --mode test
+python3 tools/pinterest_publish_pin.py \
+  --input /path/to/request.json \
+  --mode test \
+  --chrome-profile /absolute/path/to/chrome-profile
 ```
 
 6. For a real publish only after explicit user intent:
 
 ```bash
-python3 tools/pinterest_publish_pin.py --input /path/to/request.json --mode final
+python3 tools/pinterest_publish_pin.py \
+  --input /path/to/request.json \
+  --mode final \
+  --chrome-profile /absolute/path/to/chrome-profile
 ```
 
 ## Interpret results
@@ -107,7 +122,7 @@ Important fields:
 
 - `errors`: blocker list to report and resolve.
 - `warnings`: non-blocking concerns.
-- `checks.chromeCdp.reachable`: whether Chrome CDP is reachable.
+- `checks.chromeCdp.reachable`: optional legacy fallback status.
 - `pinUrl`: final Pinterest URL after `final` mode.
 - `stdoutTail` and `stderrTail`: use only for debugging; prefer structured fields.
 
@@ -118,7 +133,7 @@ For `final` mode, report the `pinUrl` if present. If `ok` is true but `pinUrl` i
 - `image does not exist`: ask for or locate the correct absolute image path.
 - `board is required`: ask for the exact Pinterest board name.
 - `playwright dependency is not installed`: run `npm install` in the repo.
-- `Chrome CDP is not reachable`: Chrome is not running with remote debugging on `9222`.
+- `chromeProfile is required`: ask the user for an absolute path to a dedicated Chrome profile directory, or create one under their home directory.
 - `未能确认 Board 已选中`: the board name did not match Pinterest's UI; ask for the exact visible board name, or use a `Full Board Name|Short Alias` value.
 - Upload or Publish button failures usually mean Pinterest changed its UI or the account session needs manual attention.
 

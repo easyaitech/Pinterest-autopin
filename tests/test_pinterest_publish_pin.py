@@ -14,13 +14,13 @@ pinterest_publish_pin = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(pinterest_publish_pin)
 
 
-def fake_checks() -> dict:
+def fake_checks(chrome_cdp_reachable: bool = True) -> dict:
     return {
         "nodeScriptExists": True,
         "nodePath": "/usr/bin/node",
         "sipsPath": "/usr/bin/sips",
         "playwrightInstalled": True,
-        "chromeCdp": {"reachable": True},
+        "chromeCdp": {"reachable": chrome_cdp_reachable},
     }
 
 
@@ -40,6 +40,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
             "link": "https://example.com",
             "description": "Description",
             "altText": "Alt text",
+            "chromeProfile": "",
         }
 
     def test_valid_payload_passes_validate_mode(self) -> None:
@@ -81,6 +82,57 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
         self.assertIn("link must be an absolute http(s) URL: example.com/product", errors)
 
+    def test_chrome_profile_must_be_absolute(self) -> None:
+        payload = self.valid_payload()
+        payload["chromeProfile"] = "profile"
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(chrome_cdp_reachable=False), "test"
+        )
+
+        self.assertIn("chromeProfile must be an absolute path: profile", errors)
+
+    def test_chrome_profile_allows_test_mode_without_cdp(self) -> None:
+        with tempfile.TemporaryDirectory() as profile_dir:
+            payload = self.valid_payload()
+            payload["chromeProfile"] = profile_dir
+
+            errors, warnings = pinterest_publish_pin.validate_payload(
+                payload, fake_checks(chrome_cdp_reachable=False), "test"
+            )
+
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_missing_chrome_profile_and_cdp_fails_in_test_mode(self) -> None:
+        payload = self.valid_payload()
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(chrome_cdp_reachable=False), "test"
+        )
+
+        self.assertIn(
+            "chromeProfile is required in test/final mode unless an existing "
+            "Chrome CDP session is reachable",
+            errors,
+        )
+
+    def test_missing_chrome_profile_directory_warns_but_can_be_created(self) -> None:
+        with tempfile.TemporaryDirectory() as parent_dir:
+            payload = self.valid_payload()
+            payload["chromeProfile"] = str(Path(parent_dir) / "missing-pinterest-profile")
+
+            errors, warnings = pinterest_publish_pin.validate_payload(
+                payload, fake_checks(chrome_cdp_reachable=False), "test"
+            )
+
+        self.assertEqual([], errors)
+        self.assertIn(
+            "chromeProfile directory does not exist yet; it will be created, "
+            "but Pinterest login may be required",
+            warnings,
+        )
+
     def test_missing_board_warns_in_validate_but_fails_in_execution_modes(self) -> None:
         payload = self.valid_payload()
         payload["board"] = ""
@@ -111,11 +163,27 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
             link=None,
             description=None,
             alt_text=None,
+            chrome_profile=None,
         )
 
         payload = pinterest_publish_pin.normalize_payload({"title": 123}, args)
 
         self.assertEqual(123, payload["title"])
+
+    def test_normalize_payload_accepts_chrome_profile_alias(self) -> None:
+        args = argparse.Namespace(
+            image=None,
+            title=None,
+            board=None,
+            link=None,
+            description=None,
+            alt_text=None,
+            chrome_profile=None,
+        )
+
+        payload = pinterest_publish_pin.normalize_payload({"chrome_profile": "/tmp/profile"}, args)
+
+        self.assertEqual("/tmp/profile", payload["chromeProfile"])
 
 
 if __name__ == "__main__":
