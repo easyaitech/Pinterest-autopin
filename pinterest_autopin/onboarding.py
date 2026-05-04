@@ -149,10 +149,13 @@ def run_onboarding(
             (
                 "Local Feishu config is present and structurally valid."
                 if config_exists and not config_errors
-                else "Create .gstack/feishu-worker-config.json from the user's Base link."
+                else "Create the Feishu Base schema and local config from the user's shared Base/wiki URL."
             ),
-            user_action="Send the Feishu Base/wiki link and approve schema creation when prompted.",
-            agent_action="Resolve the Base, create missing tables/fields, and write .gstack/feishu-worker-config.json.",
+            user_action="Send the Feishu Base/wiki shared URL.",
+            agent_action=(
+                "python3 tools/feishu_pinterest_worker.py setup-base "
+                f"--config {resolved_config} --base-url <Feishu Base/wiki shared URL>"
+            ),
             blocking=True,
             details={"configPath": str(resolved_config), "errors": config_errors[:5]},
         )
@@ -194,16 +197,21 @@ def run_onboarding(
             )
         )
 
+    product_errors = ["product table check skipped until Hermes identity, Feishu CLI, and config are ready"]
     if config and hermes_ok and feishu_cli_path and not config_errors:
         try:
-            doctor = FeishuPinterestWorker.from_config(
+            worker = FeishuPinterestWorker.from_config(
                 config,
                 local_dev=local_dev,
                 chrome_profile=chrome_profile,
-            ).doctor()
+            )
+            doctor = worker.doctor()
             doctor_errors = list(doctor.errors)
+            product_check = worker.product_check()
+            product_errors = list(product_check.errors)
         except Exception as exc:  # noqa: BLE001
             doctor_errors = [str(exc)]
+            product_errors = [str(exc)]
     else:
         doctor_errors = ["doctor skipped until Hermes identity, Feishu CLI, and config are ready"]
     steps.append(
@@ -215,6 +223,24 @@ def run_onboarding(
             agent_action=f"python3 tools/feishu_pinterest_worker.py doctor --config {resolved_config}",
             blocking=True,
             details={"errors": doctor_errors[:5]},
+        )
+    )
+    steps.append(
+        _step(
+            "product_table_link",
+            "Verify Pins are linked to Products",
+            "complete" if not product_errors else "action_required",
+            (
+                "Pins are linked to the Products table and product facts are usable."
+                if not product_errors
+                else "Link each Pin to a complete Products row before prepare."
+            ),
+            user_action=(
+                "Fill Products with product name, description, and Etsy URL, then link each ready Pin to a Products row."
+            ),
+            agent_action=f"python3 tools/feishu_pinterest_worker.py doctor --config {resolved_config}",
+            blocking=True,
+            details={"errors": product_errors[:5]},
         )
     )
 
@@ -320,7 +346,15 @@ def run_onboarding(
         )
     )
 
-    prepare_required = ["install_dependencies", "hermes_identity", "feishu_config", "feishu_cli", "feishu_doctor", "prepare_singleton"]
+    prepare_required = [
+        "install_dependencies",
+        "hermes_identity",
+        "feishu_config",
+        "feishu_cli",
+        "feishu_doctor",
+        "product_table_link",
+        "prepare_singleton",
+    ]
     if _config_flavor(config) == "lark":
         prepare_required.append("feishu_auth")
     ready_for_prepare = _all_complete(steps, prepare_required)

@@ -12,16 +12,18 @@ from pinterest_autopin.worker_config import TableConfig, WorkerConfig
 
 
 class FakeStore:
-    def __init__(self, records: list[dict] | None = None) -> None:
+    def __init__(self, records: list[dict] | None = None, products: list[dict] | None = None) -> None:
         self.records = records or []
+        self.products = products or []
         self.updates: list[tuple[str, str, dict]] = []
         self.uploaded: list[str] = []
 
     def list_records(self, table_id: str, *, filter_expr: str = "", page_size: int = 20) -> list[dict]:
+        records = self.products if table_id == "products" else self.records
         if "record_id=" in filter_expr:
             record_id = filter_expr.split('"')[1]
-            return [record for record in self.records if record["record_id"] == record_id]
-        return self.records
+            return [record for record in records if record["record_id"] == record_id]
+        return records
 
     def update_record(self, table_id: str, record_id: str, fields: dict) -> dict:
         self.updates.append((table_id, record_id, fields))
@@ -66,11 +68,22 @@ class NoopPublisher:
         return PublisherResult(True, "final")
 
 
+def config() -> WorkerConfig:
+    return WorkerConfig(
+        "app",
+        TableConfig("pins"),
+        TableConfig("brands"),
+        TableConfig("runs"),
+        TableConfig("locks"),
+        products=TableConfig("products"),
+    )
+
+
 class WorkerPrepareTest(unittest.TestCase):
     def test_prepare_with_no_records_reports_no_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             worker = FeishuPinterestWorker(
-                WorkerConfig("app", TableConfig("pins"), TableConfig("brands"), TableConfig("runs"), TableConfig("locks")),
+                config(),
                 RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
                 FakeStore(),
                 NoopPublisher(),
@@ -86,15 +99,22 @@ class WorkerPrepareTest(unittest.TestCase):
             "record_id": "pin-1",
             "fields": {
                 "status": "待 AI 生成",
+                "product": [{"record_id": "product-1"}],
                 "source_image": [{"file_token": "source-token", "name": "source.jpg"}],
+            },
+        }
+        product = {
+            "record_id": "product-1",
+            "fields": {
                 "product_name": "Handmade Mug",
                 "product_description": "A ceramic mug for quiet mornings.",
+                "product_link": "https://example.etsy.com/listing/1",
             },
         }
         with tempfile.TemporaryDirectory() as temp_dir:
-            store = FakeStore([record])
+            store = FakeStore([record], [product])
             worker = FeishuPinterestWorker(
-                WorkerConfig("app", TableConfig("pins"), TableConfig("brands"), TableConfig("runs"), TableConfig("locks")),
+                config(),
                 RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
                 store,
                 NoopPublisher(),
@@ -105,7 +125,10 @@ class WorkerPrepareTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(1, result.processed)
         self.assertEqual("待人工审核", record["fields"]["status"])
-        self.assertEqual("Handmade Mug", record["fields"]["draft_title"])
+        self.assertIn("Handmade Mug", record["fields"]["draft_title"])
+        self.assertIn("Gift", record["fields"]["draft_title"])
+        self.assertIn("Etsy", record["fields"]["draft_description"])
+        self.assertIn("#EtsyFinds", record["fields"]["draft_tags"])
         self.assertEqual("processed-token", record["fields"]["processed_image"][0]["file_token"])
         self.assertTrue(store.uploaded)
 
@@ -126,7 +149,7 @@ class WorkerPrepareTest(unittest.TestCase):
 
             store.compare_update_record = racing_compare  # type: ignore[method-assign]
             worker = FeishuPinterestWorker(
-                WorkerConfig("app", TableConfig("pins"), TableConfig("brands"), TableConfig("runs"), TableConfig("locks")),
+                config(),
                 RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
                 store,
                 NoopPublisher(),

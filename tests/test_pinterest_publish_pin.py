@@ -37,6 +37,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
             description=None,
             alt_text=None,
             chrome_profile=chrome_profile,
+            creation_url=None,
             no_default_chrome_profile=no_default,
         )
 
@@ -56,6 +57,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
             "description": "Description",
             "altText": "Alt text",
             "chromeProfile": "",
+            "creationUrl": pinterest_publish_pin.DEFAULT_CREATION_URL,
         }
 
     def test_valid_payload_passes_validate_mode(self) -> None:
@@ -96,6 +98,54 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         )
 
         self.assertIn("link must be an absolute http(s) URL: example.com/product", errors)
+
+    def test_creation_url_accepts_localized_pin_creation_tool(self) -> None:
+        payload = self.valid_payload()
+        payload["creationUrl"] = "https://jp.pinterest.com/pin-creation-tool/"
+
+        errors, warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_creation_url_must_be_pinterest_create_surface(self) -> None:
+        payload = self.valid_payload()
+        payload["creationUrl"] = "https://example.com/pin-creation-tool/"
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertIn(
+            "creationUrl must be a Pinterest URL: https://example.com/pin-creation-tool/",
+            errors,
+        )
+
+    def test_creation_url_rejects_lookalike_pinterest_domain(self) -> None:
+        payload = self.valid_payload()
+        payload["creationUrl"] = "https://evilpinterest.com/pin-creation-tool/"
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertIn(
+            "creationUrl must be a Pinterest URL: https://evilpinterest.com/pin-creation-tool/",
+            errors,
+        )
+
+    def test_creation_url_accepts_localized_domain_with_port(self) -> None:
+        payload = self.valid_payload()
+        payload["creationUrl"] = "https://jp.pinterest.com:443/pin-creation-tool/"
+
+        errors, warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
 
     def test_chrome_profile_must_be_absolute(self) -> None:
         payload = self.valid_payload()
@@ -238,6 +288,7 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         payload, profile_meta = pinterest_publish_pin.normalize_payload_with_meta({}, self.args())
 
         self.assertEqual("", payload["chromeProfile"])
+        self.assertEqual(pinterest_publish_pin.DEFAULT_CREATION_URL, payload["creationUrl"])
         self.assertEqual("none", profile_meta["source"])
 
     def test_expand_profile_path_accepts_tilde_and_environment_variables(self) -> None:
@@ -368,6 +419,14 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         )
 
         self.assertEqual("Pinterest login required at https://www.pinterest.com/", message)
+
+    def test_find_pin_url_accepts_localized_pinterest_subdomain(self) -> None:
+        pin_url = pinterest_publish_pin.find_pin_url(
+            None,
+            "created https://jp.pinterest.com/pin/123456789/",
+        )
+
+        self.assertEqual("https://jp.pinterest.com/pin/123456789/", pin_url)
 
 
 if __name__ == "__main__":

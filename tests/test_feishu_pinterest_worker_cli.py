@@ -36,6 +36,7 @@ class FeishuPinterestWorkerCliTest(unittest.TestCase):
                             "pins": {
                                 "table_id": "pins",
                                 "fields": {
+                                    "product": "product",
                                     "status": "status",
                                     "scheduled_at": "scheduled_at",
                                     "publisher_run_id": "publisher_run_id",
@@ -43,6 +44,14 @@ class FeishuPinterestWorkerCliTest(unittest.TestCase):
                                     "prepare_run_id": "prepare_run_id",
                                     "prepare_expires_at": "prepare_expires_at",
                                     "last_error": "last_error",
+                                },
+                            },
+                            "products": {
+                                "table_id": "products",
+                                "fields": {
+                                    "product_name": "product_name",
+                                    "product_description": "product_description",
+                                    "product_link": "product_link",
                                 },
                             },
                             "brands": {"table_id": "brands", "fields": {}},

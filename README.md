@@ -239,7 +239,8 @@ npm run pin:publish -- --input examples/request.json
   "board": "Board Name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description"
+  "altText": "Accessible image description",
+  "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
 }
 ```
 
@@ -265,10 +266,11 @@ The Python tool prints JSON to stdout. On success, it includes:
 ## Notes
 
 - `--mode validate` never opens Chrome or touches Pinterest.
-- `--mode check-login` opens the Pin builder only to confirm the profile is logged in. It does not upload, fill, or publish.
-- `--mode test` opens the pin builder and fills the form, but does not publish.
+- `--mode check-login` opens the Pinterest creation page only to confirm the profile is logged in. It does not upload, fill, or publish.
+- `--mode test` opens the Pinterest creation page and fills the form, but does not publish.
 - `board` is required in `test` and `final` mode. There is no silent default board.
 - `image` must be an absolute path. `link`, when present, must be an absolute `http` or `https` URL.
+- `creationUrl` is optional and defaults to `https://www.pinterest.com/pin-creation-tool/`. Use `https://jp.pinterest.com/pin-creation-tool/` for the localized storyboard creation UI.
 - `chromeProfile` is optional. If omitted, the CLI resolves a stable profile automatically.
 - If the resolved profile directory does not exist, it will be created.
 - `publish_playwright.js` now supports:
@@ -276,6 +278,7 @@ The Python tool prints JSON to stdout. On success, it includes:
   - `--data <inline-json-or-file>`
   - `--result-json <json-file>`
   - `--chrome-profile <profile-dir>`
+  - `--creation-url <pinterest-create-url>`
 
 ## Example request
 
@@ -296,11 +299,14 @@ Invoke it as `$pinterest-autopin` in a Hermes-compatible agent. The Skill intent
 The multi-step Feishu workflow uses a separate worker CLI:
 
 ```bash
+python3 tools/feishu_pinterest_worker.py setup-base --config .gstack/feishu-worker-config.json --base-url "<Feishu Base or Wiki shared URL>"
 python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json
 python3 tools/feishu_pinterest_worker.py doctor --config .gstack/feishu-worker-config.json
 python3 tools/feishu_pinterest_worker.py prepare --config .gstack/feishu-worker-config.json --limit 10
 python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-config.json --limit 1
 ```
+
+When the user provides a Feishu Base/wiki shared URL for setup, run `setup-base` instead of asking them to manually create tables or fields. It resolves the Base token, creates or completes the `Pins`, `Brands`, `Runs`, and `Runtime Locks` tables, adds all workflow fields, creates the `pinterest_profile_publish` runtime lock row, writes `.gstack/feishu-worker-config.json`, and prints the user-facing usage steps.
 
 Add `--use-chrome-cdp` to `onboard` and `publish` when the Pinterest dedicated Chrome is already open with CDP on `127.0.0.1:9222`. Do not rely on onboarding CDP success unless publish will use the same flag.
 
@@ -376,7 +382,7 @@ python3 tools/feishu_pinterest_worker.py publish \
   --publish-singleton-confirmed
 ```
 
-Create the real config by copying `examples/worker-config.example.json` into an ignored local path such as `.gstack/feishu-worker-config.json`. Do not edit the committed example with real Feishu values.
+Create the real config with `setup-base` from a Feishu share URL, or by copying `examples/worker-config.example.json` into an ignored local path such as `.gstack/feishu-worker-config.json`. Do not edit the committed example with real Feishu values.
 
 Hermes runs should provide run identity through environment variables such as:
 
@@ -421,7 +427,17 @@ Official `lark-cli` uses:
 `prepare` and `publish` require either an atomic Feishu compare-update lock or explicit `hermes_singleton` lock modes. If the CLI does not expose atomic compare-update and singleton mode is not configured, the worker refuses to mutate rows instead of using a non-atomic fallback.
 For official `lark-cli`, use `hermes_singleton` only after the Hermes schedules are configured with max concurrency 1.
 
-`prepare` claims ready rows, downloads `source_image`, writes draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
+`prepare` claims ready rows, downloads `source_image`, generates higher-intent Pinterest draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
+
+The worker keeps all output in the existing draft fields; no extra Feishu fields are required. Draft generation now does five things:
+
+- Reads product information from `product_name`, `product_description`, `product_link`, `pinterest_board`, `brand_name`, `keywords`, `tags`, and `notes`.
+- Extracts lightweight image signals from the downloaded image path: dimensions, orientation, filename product terms, and filename style/material terms.
+- Chooses a Pinterest search intent such as gift, personalized gift, occasion gift, home decor, or printable/download.
+- Writes Etsy-conversion copy: title with search intent, description with a clear Etsy click cue, tags with product/audience/style terms, and alt text.
+- Runs a quality gate before writing drafts. It checks title length, product/search term coverage, description length, Etsy click cue, tag count, `#EtsyFinds`, and alt text.
+
+This is a deterministic worker-side quality engine. If Hermes performs model-based image understanding or copywriting before or around `prepare`, it should still treat product fields as the source of truth, use image observations only for visible details, avoid unsupported claims, and write structured draft fields back to the same Pins row for human review.
 
 Publish safety order:
 

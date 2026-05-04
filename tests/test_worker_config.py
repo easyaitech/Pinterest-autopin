@@ -12,6 +12,7 @@ def config_payload() -> dict:
             "pins": {
                 "table_id": "pins",
                 "fields": {
+                    "product": "fld_product",
                     "status": "fld_status",
                     "scheduled_at": "fld_scheduled",
                     "publisher_run_id": "fld_publisher",
@@ -21,6 +22,7 @@ def config_payload() -> dict:
                     "prepare_run_id": "fld_prepare",
                     "prepare_expires_at": "fld_prepare_expires",
                     "last_error": "fld_error",
+                    "product": "fld_product",
                     "source_image": "fld_source_image",
                     "processed_image": "fld_processed_image",
                     "draft_title": "fld_draft_title",
@@ -33,9 +35,24 @@ def config_payload() -> dict:
                     "final_tags": "fld_final_tags",
                     "final_alt_text": "fld_final_alt_text",
                     "final_board": "fld_final_board",
-                    "product_link": "fld_product_link",
                     "pin_url": "fld_pin_url",
                     "published_at": "fld_published_at",
+                },
+            },
+            "products": {
+                "table_id": "products",
+                "fields": {
+                    "product_name": "fld_product_name",
+                    "product_description": "fld_product_description",
+                    "product_link": "fld_product_link",
+                },
+            },
+            "products": {
+                "table_id": "products",
+                "fields": {
+                    "product_name": "fld_product_name",
+                    "product_description": "fld_product_description",
+                    "product_link": "fld_product_link",
                 },
             },
             "brands": {"table_id": "brands", "fields": {}},
@@ -95,6 +112,20 @@ class WorkerConfigTest(unittest.TestCase):
         config = worker_config_from_dict(payload)
 
         self.assertIn("pins.fields.publish_attempts is required", validate_worker_config(config))
+
+    def test_missing_product_link_field_is_reported(self) -> None:
+        payload = config_payload()
+        del payload["tables"]["pins"]["fields"]["product"]
+        config = worker_config_from_dict(payload)
+
+        self.assertIn("pins.fields.product is required", validate_worker_config(config))
+
+    def test_missing_product_table_field_is_reported(self) -> None:
+        payload = config_payload()
+        del payload["tables"]["products"]["fields"]["product_description"]
+        config = worker_config_from_dict(payload)
+
+        self.assertIn("products.fields.product_description is required", validate_worker_config(config))
 
     def test_public_example_placeholders_are_rejected(self) -> None:
         payload = config_payload()

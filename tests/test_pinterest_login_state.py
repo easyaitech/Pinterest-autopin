@@ -56,6 +56,59 @@ class PinterestLoginStateTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
 
+    def test_localized_pin_creation_tool_surface_is_ok(self) -> None:
+        result = classify(
+            {
+                "url": "https://jp.pinterest.com/pin-creation-tool/",
+                "loginWall": False,
+                "hasCreateSurface": True,
+            }
+        )
+
+        self.assertTrue(result["ok"])
+
+    def test_localized_pin_creation_tool_without_surface_is_not_login_redirect(self) -> None:
+        result = classify(
+            {
+                "url": "https://jp.pinterest.com/pin-creation-tool/",
+                "loginWall": False,
+                "hasCreateSurface": False,
+            }
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            "Pinterest create surface not detected at https://jp.pinterest.com/pin-creation-tool/",
+            result["reason"],
+        )
+
+    def test_create_surface_on_lookalike_domain_is_not_ok(self) -> None:
+        result = classify(
+            {
+                "url": "https://evilpinterest.com/pin-creation-tool/",
+                "loginWall": False,
+                "hasCreateSurface": True,
+            }
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            "Pinterest create surface not detected at https://evilpinterest.com/pin-creation-tool/",
+            result["reason"],
+        )
+
+    def test_homepage_textbox_does_not_count_as_create_surface(self) -> None:
+        result = classify(
+            {
+                "url": "https://www.pinterest.com/",
+                "loginWall": False,
+                "hasCreateSurface": True,
+            }
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("Pinterest login required at https://www.pinterest.com/", result["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

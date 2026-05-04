@@ -1,7 +1,9 @@
 """Feishu-backed Pinterest workflow helpers."""
 
 __all__ = [
+    "content_generation",
     "feishu_cli",
+    "feishu_schema",
     "hermes_runtime",
     "image_prepare",
     "pin_draft",

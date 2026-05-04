@@ -1,6 +1,6 @@
 ---
 name: pinterest-autopin
-version: 1.3.4
+version: 1.3.6
 description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
 ---
 
@@ -16,6 +16,16 @@ For Hermes Feishu workflow setup, run the guided onboarding command before `prep
 python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json
 ```
 
+When the user provides a Feishu Base/wiki shared URL for setup, run schema setup immediately instead of asking them to create fields manually:
+
+```bash
+python3 tools/feishu_pinterest_worker.py setup-base \
+  --config .gstack/feishu-worker-config.json \
+  --base-url "<Feishu Base or Wiki shared URL>"
+```
+
+After `setup-base`, summarize the printed `usage` steps for the user.
+
 Treat `readyForPrepare: true` as permission to run content generation. Treat `readyForPublish: true` as permission to schedule final publishing. If `nextActions` is not empty, guide the user through those actions first.
 Use `--target prepare` before generation jobs and `--target publish` before final publish jobs. If official `lark-cli` is used, pass the same `--prepare-singleton-confirmed` or `--publish-singleton-confirmed` flag to the real Hermes worker command, unless the local config already sets the matching `*_lock_mode` to `hermes_singleton`.
 If onboarding returns `skill_update`, ask the user whether to upgrade before running mutable workflow commands. Only run the returned upgrade command after explicit approval.
@@ -27,6 +37,7 @@ If onboarding returns `skill_update`, ask the user whether to upgrade before run
 - Do not publish for real unless the user explicitly asks to publish, post, send, or run final mode.
 - If the user asks to preview, test, or verify one explicit Pin, use `test` mode.
 - If the user asks for Feishu/Hermes `prepare` or workflow setup, run onboarding first and follow its `nextActions`; do not collect direct Pin fields unless they explicitly request one-off Pin test/final mode.
+- If the user gives a Feishu Base/wiki shared URL, run `setup-base` to create/complete all required tables and fields, then explain how to use the table.
 - If required fields are missing for `test` or `final`, ask for the missing values instead of inventing them.
 - Always use the CLI wrapper and its JSON output; do not call the Playwright script directly unless debugging the wrapper.
 
@@ -64,7 +75,8 @@ Prepare a JSON object with this shape:
   "board": "Pinterest board name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description"
+  "altText": "Accessible image description",
+  "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
 }
 ```
 
@@ -79,9 +91,11 @@ Optional:
 - `link`
 - `description`
 - `altText`
+- `creationUrl`, only needed to target a localized creation surface such as `https://jp.pinterest.com/pin-creation-tool/`
 - `chromeProfile`, only needed to override the default dedicated profile
 
 `link`, when present, must be an absolute `http` or `https` URL.
+`creationUrl`, when present, must be an absolute Pinterest creation URL.
 `chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it is omitted, the CLI resolves a stable profile automatically.
 
 The dedicated Chrome profile display name is `Pinterest AutoPin` after initialization, so the user can tell it apart from personal Chrome profiles.
@@ -130,6 +144,14 @@ For an existing dedicated profile, rerun the init command with that Chrome windo
 python3 tools/pinterest_publish_pin.py --mode check-login
 ```
 
+For the localized storyboard creation UI, pass the creation URL in JSON or on the CLI:
+
+```bash
+python3 tools/pinterest_publish_pin.py \
+  --mode check-login \
+  --creation-url https://jp.pinterest.com/pin-creation-tool/
+```
+
 If the dedicated Chrome profile is already open, do not launch the same profile again. First verify that the open Chrome was started with local CDP on `127.0.0.1:9222`, then run check-login through the existing browser session:
 
 ```bash
@@ -140,7 +162,7 @@ python3 tools/pinterest_publish_pin.py \
 
 Use the same CDP strategy for later Feishu publish work by passing `--use-chrome-cdp` to `tools/feishu_pinterest_worker.py onboard` and `publish`. If CDP is not reachable, ask the user to either close the dedicated Chrome window before running profile mode, or reopen it with `--remote-debugging-port=9222`.
 
-6. If `check-login` returns `ok: true` and the user is setting up the Feishu/Hermes workflow, do not ask for single-Pin image/title/board fields. Move to Feishu onboarding:
+6. If `check-login` returns `ok: true` and the user is setting up the Feishu/Hermes workflow, do not ask for single-Pin image/title/board fields. If they gave a Feishu Base/wiki shared URL, run `setup-base`; otherwise move to Feishu onboarding:
 
 ```bash
 python3 tools/feishu_pinterest_worker.py onboard \
@@ -179,6 +201,8 @@ The local Feishu config should stay in an ignored file such as `.gstack/feishu-w
 ```
 
 Only continue to `test` or `final` with direct Pin fields when the user explicitly asks for one-off Pin validation, dry-run filling, or final publishing.
+
+Worker-side `prepare` now uses a deterministic quality engine before writing draft fields. It reads existing product fields, extracts lightweight image signals from the downloaded image path, chooses a Pinterest search intent, writes Etsy-conversion copy, and runs a quality gate. It does not add new Feishu fields. Hermes may still perform model-based image understanding or copywriting outside the worker; when it does, product fields are the source of truth and image observations should only add visible details.
 
 7. For a preview that fills one explicit Pinterest form but does not publish:
 

@@ -13,7 +13,14 @@ from pinterest_autopin.worker_config import WorkerConfig, TableConfig
 
 
 class FakeStore:
-    def __init__(self, *, lock_owner: str = "", pin_status: str = "已批准待发布", pins: list[dict] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        lock_owner: str = "",
+        pin_status: str = "已批准待发布",
+        pins: list[dict] | None = None,
+        products: list[dict] | None = None,
+    ) -> None:
         lock_expires_at = "2000-01-01T00:00:00Z"
         if lock_owner:
             lock_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
@@ -33,19 +40,34 @@ class FakeStore:
                 "final_image": [{"file_token": "final-token", "name": "image.jpg"}],
                 "final_title": "Title",
                 "final_board": "Board",
-                "product_link": "https://example.com",
+                "product": [{"record_id": "product-1"}],
                 "final_description": "Desc",
                 "final_alt_text": "Alt",
                 "publish_attempts": 2,
             },
         }
         self.pins = pins or [self.pin]
+        self.products = products or [
+            {
+                "record_id": "product-1",
+                "fields": {
+                    "product_name": "Product",
+                    "product_description": "A product description with enough detail.",
+                    "product_link": "https://example.com",
+                },
+            }
+        ]
         self.updates: list[tuple[str, str, dict]] = []
         self.downloads: list[tuple[str, str]] = []
 
     def list_records(self, table_id: str, *, filter_expr: str = "", page_size: int = 20) -> list[dict]:
         if table_id == "locks":
             return [self.lock]
+        if table_id == "products":
+            if "record_id=" in filter_expr:
+                record_id = filter_expr.split('"')[1]
+                return [product for product in self.products if product["record_id"] == record_id]
+            return self.products
         if "record_id=" in filter_expr:
             record_id = filter_expr.split('"')[1]
             return [pin for pin in self.pins if pin["record_id"] == record_id]
@@ -112,6 +134,7 @@ def config(**kwargs) -> WorkerConfig:
         brands=TableConfig("brands", fields={}),
         runs=TableConfig("runs", fields={}),
         runtime_locks=TableConfig("locks", fields={}),
+        products=TableConfig("products", fields={}),
         **kwargs,
     )
 
@@ -198,7 +221,7 @@ class WorkerPublishTest(unittest.TestCase):
                     "final_image": [{"file_token": "final-token-2", "name": "image2.jpg"}],
                     "final_title": "Title",
                     "final_board": "Board",
-                    "product_link": "https://example.com",
+                    "product": [{"record_id": "product-1"}],
                     "final_description": "Desc",
                     "final_alt_text": "Alt",
                     "publish_attempts": 0,

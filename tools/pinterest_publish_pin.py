@@ -21,10 +21,22 @@ from urllib.parse import urlparse
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NODE_SCRIPT = REPO_ROOT / "publish_playwright.js"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-PIN_URL_RE = re.compile(r"https?://(?:www\.)?pinterest\.com/pin/[^\s\"'<>]+")
-TEXT_FIELDS = ("image", "title", "board", "link", "description", "altText", "chromeProfile")
+PIN_URL_RE = re.compile(r"https?://(?:[a-z0-9-]+\.)?pinterest\.com/pin/[^\s\"'<>]+")
+TEXT_FIELDS = (
+    "image",
+    "title",
+    "board",
+    "link",
+    "description",
+    "altText",
+    "chromeProfile",
+    "creationUrl",
+)
 PROFILE_KEYS = ("chromeProfile", "chrome_profile", "chrome-profile")
+CREATION_URL_KEYS = ("creationUrl", "creation_url", "creation-url")
 PROFILE_ENV_VAR = "PINTEREST_AUTOPIN_CHROME_PROFILE"
+CREATION_URL_ENV_VAR = "PINTEREST_AUTOPIN_CREATION_URL"
+DEFAULT_CREATION_URL = "https://www.pinterest.com/pin-creation-tool/"
 CONFIG_DIR = Path.home() / ".pinterest-autopin"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_CHROME_PROFILE = CONFIG_DIR / "chrome-profile"
@@ -54,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         "--chrome-profile",
         dest="chrome_profile",
         help="Absolute path to a dedicated Chrome user data directory.",
+    )
+    parser.add_argument(
+        "--creation-url",
+        dest="creation_url",
+        help="Pinterest Pin creation URL, for example https://jp.pinterest.com/pin-creation-tool/.",
     )
     parser.add_argument(
         "--print-chrome-profile",
@@ -136,6 +153,22 @@ def resolve_chrome_profile(payload: dict[str, Any], args: argparse.Namespace) ->
     return str(DEFAULT_CHROME_PROFILE), "default"
 
 
+def resolve_creation_url(payload: dict[str, Any], args: argparse.Namespace) -> Any:
+    if getattr(args, "creation_url", None) is not None:
+        return args.creation_url
+
+    for key in CREATION_URL_KEYS:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+
+    env_value = os.environ.get(CREATION_URL_ENV_VAR, "").strip()
+    if env_value:
+        return env_value
+
+    return DEFAULT_CREATION_URL
+
+
 def chrome_profile_metadata(source: str) -> dict[str, str]:
     return {
         "source": source,
@@ -159,6 +192,7 @@ def normalize_payload_with_meta(
         "description": args.description,
         "altText": args.alt_text,
         "chromeProfile": args.chrome_profile,
+        "creationUrl": getattr(args, "creation_url", None),
     }
     for key, value in overrides.items():
         if value is not None:
@@ -171,6 +205,7 @@ def normalize_payload_with_meta(
         alt_text = payload.get("alt-text")
 
     chrome_profile, chrome_profile_source = resolve_chrome_profile(payload, args)
+    creation_url = resolve_creation_url(payload, args)
 
     normalized = {
         "image": payload.get("image", ""),
@@ -180,6 +215,7 @@ def normalize_payload_with_meta(
         "description": payload.get("description", ""),
         "altText": "" if alt_text is None else alt_text,
         "chromeProfile": "" if chrome_profile is None else chrome_profile,
+        "creationUrl": "" if creation_url is None else creation_url,
     }
     return normalized, chrome_profile_metadata(chrome_profile_source)
 
@@ -251,6 +287,18 @@ def validate_chrome_profile_path(
     return errors, warnings
 
 
+def validate_creation_url(creation_url: str) -> list[str]:
+    parsed = urlparse(creation_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return [f"creationUrl must be an absolute http(s) URL: {creation_url}"]
+    host = (parsed.hostname or "").lower()
+    if host != "pinterest.com" and not host.endswith(".pinterest.com"):
+        return [f"creationUrl must be a Pinterest URL: {creation_url}"]
+    if "/pin-creation-tool" not in parsed.path and "/pin-builder" not in parsed.path:
+        return [f"creationUrl must point to a Pinterest creation page: {creation_url}"]
+    return []
+
+
 def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -278,6 +326,8 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
         parsed_link = urlparse(payload["link"])
         if parsed_link.scheme not in {"http", "https"} or not parsed_link.netloc:
             errors.append(f"link must be an absolute http(s) URL: {payload['link']}")
+
+    errors.extend(validate_creation_url(payload["creationUrl"].strip()))
 
     chrome_profile = payload["chromeProfile"].strip()
     profile_errors, profile_warnings = validate_chrome_profile_path(chrome_profile)

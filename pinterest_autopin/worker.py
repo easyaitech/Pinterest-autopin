@@ -7,6 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from .content_generation import generate_pin_draft
 from .feishu_cli import FeishuCli
 from .hermes_runtime import RuntimeContext, RuntimeErrorConfig, build_runtime_context
 from .image_prepare import prepare_image
@@ -127,6 +128,41 @@ class FeishuPinterestWorker:
         if errors:
             return WorkerResult(False, "doctor", errors=tuple(errors))
         return WorkerResult(True, "doctor")
+
+    def product_check(self) -> WorkerResult:
+        errors = validate_product_table_config(self.config)
+        if errors:
+            return WorkerResult(False, "product-check", errors=tuple(errors))
+        try:
+            product_records = self.store.list_records(self.config.products.table_id, page_size=10)
+        except Exception as exc:  # noqa: BLE001
+            return WorkerResult(False, "product-check", errors=(f"failed to read Products table: {exc}",))
+        if not product_records:
+            return WorkerResult(False, "product-check", errors=("Products table has no product records",))
+
+        valid_products = 0
+        for record in product_records[:10]:
+            product_fields = self._product_fields(record)
+            product_errors = _product_validation_errors(product_fields)
+            if not product_errors:
+                valid_products += 1
+        if not valid_products:
+            errors.append("Products table has no complete product records")
+
+        ready_pins = self._list_prepare_candidates(10)
+        for record in ready_pins[:10]:
+            fields = self._pin_fields(record)
+            record_id = _record_id(record) or "<unknown>"
+            if not _linked_record_id(fields.get("product")):
+                errors.append(f"Pin {record_id} is not linked to a Products record")
+                continue
+            try:
+                self._linked_product_fields(fields)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Pin {record_id} linked product is invalid: {exc}")
+        if errors:
+            return WorkerResult(False, "product-check", errors=tuple(errors[:10]))
+        return WorkerResult(True, "product-check", processed=valid_products)
 
     def publish(self, *, limit: int | None = None) -> WorkerResult:
         if not self.runtime.hermes_run_id:
@@ -360,12 +396,14 @@ class FeishuPinterestWorker:
             if callable(upload):
                 token = upload(str(prepared.output_path))
                 processed_ref = [{"file_token": token, "name": prepared.output_path.name}]
-        draft = _draft_from_fields(fields)
+        product_fields = self._linked_product_fields(fields)
+        merged_fields = _merge_pin_product_fields(fields, product_fields)
+        draft = generate_pin_draft(merged_fields, prepared.output_path)
         update: dict[str, Any] = {
-            "draft_title": draft["title"],
-            "draft_description": draft["description"],
-            "draft_tags": draft["tags"],
-            "draft_alt_text": draft["alt_text"],
+            "draft_title": draft.title,
+            "draft_description": draft.description,
+            "draft_tags": draft.tags,
+            "draft_alt_text": draft.alt_text,
             "processed_image_path": str(prepared.output_path),
         }
         if processed_ref:
@@ -383,7 +421,9 @@ class FeishuPinterestWorker:
 
     def _publisher_request(self, record_id: str, fields: Mapping[str, Any]) -> dict[str, Any]:
         image_path = self._publish_image(record_id, fields)
-        return _publisher_request(fields, image_path)
+        product_fields = self._linked_product_fields(fields)
+        merged_fields = _merge_pin_product_fields(fields, product_fields)
+        return _publisher_request(merged_fields, image_path)
 
     def _publish_image(self, record_id: str, fields: Mapping[str, Any]) -> str:
         ref = _attachment_ref(fields.get("final_image"))
@@ -407,8 +447,25 @@ class FeishuPinterestWorker:
         records = self.store.list_records(self.config.pins.table_id, filter_expr=f'record_id="{record_id}"', page_size=1)
         return records[0] if records else {"record_id": record_id, "fields": {}}
 
+    def _refetch_product(self, record_id: str) -> dict[str, Any]:
+        records = self.store.list_records(self.config.products.table_id, filter_expr=f'record_id="{record_id}"', page_size=1)
+        return records[0] if records else {"record_id": record_id, "fields": {}}
+
     def _pin_fields(self, record: Mapping[str, Any]) -> dict[str, Any]:
         return _logical_fields(record, dict(self.config.pins.fields))
+
+    def _product_fields(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        return _logical_fields(record, dict(self.config.products.fields))
+
+    def _linked_product_fields(self, pin_fields: Mapping[str, Any]) -> dict[str, Any]:
+        record_id = _linked_record_id(pin_fields.get("product"))
+        if not record_id:
+            raise WorkerError("Pin must link to a Products record before prepare/publish")
+        product = self._product_fields(self._refetch_product(record_id))
+        errors = _product_validation_errors(product)
+        if errors:
+            raise WorkerError("; ".join(errors))
+        return product
 
     def _update_pin(self, record_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         return self.store.update_record(
@@ -469,6 +526,60 @@ def _mapped_fields(field_map: dict[str, str], fields: dict[str, Any]) -> dict[st
 
 def _record_id(record: Mapping[str, Any]) -> str:
     return str(record.get("record_id") or record.get("id") or "")
+
+
+def validate_product_table_config(config: WorkerConfig) -> list[str]:
+    errors: list[str] = []
+    if not config.products.table_id:
+        errors.append("products.table_id is required")
+    for missing in config.products.require_fields(["product_name", "product_description", "product_link"]):
+        errors.append(f"products.fields.{missing} is required")
+    if not config.pins.fields.get("product"):
+        errors.append("pins.fields.product is required to link Pins to Products")
+    return errors
+
+
+def _linked_record_id(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        for key in ("record_id", "recordId", "id"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+        for key in ("link_record_ids", "record_ids", "ids"):
+            linked = value.get(key)
+            if isinstance(linked, list) and linked:
+                return _linked_record_id(linked[0])
+    if isinstance(value, list):
+        for item in value:
+            linked = _linked_record_id(item)
+            if linked:
+                return linked
+    return ""
+
+
+def _product_validation_errors(fields: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    product_name = str(fields.get("product_name") or "").strip()
+    product_description = str(fields.get("product_description") or "").strip()
+    product_link = str(fields.get("product_link") or "").strip()
+    if not product_name:
+        errors.append("linked product is missing product_name")
+    if len(product_description) < 20:
+        errors.append("linked product product_description must be at least 20 characters")
+    if not (product_link.startswith("http://") or product_link.startswith("https://")):
+        errors.append("linked product product_link must be an absolute URL")
+    return errors
+
+
+def _merge_pin_product_fields(pin_fields: Mapping[str, Any], product_fields: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(pin_fields)
+    for key in ("product_name", "product_description", "product_link", "brand_name", "keywords", "notes"):
+        value = product_fields.get(key)
+        if value not in (None, ""):
+            merged[key] = value
+    return merged
 
 
 def _publisher_request(fields: Mapping[str, Any], image_path: str) -> dict[str, Any]:
@@ -567,30 +678,3 @@ def _attachment_ref_from_mapping(value: Mapping[str, Any]) -> AttachmentRef | No
 def _safe_filename(value: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in ".-_" else "-" for char in value).strip(".-")
     return cleaned or "attachment"
-
-
-def _draft_from_fields(fields: Mapping[str, Any]) -> dict[str, str]:
-    product_name = str(fields.get("product_name") or fields.get("title") or fields.get("source_title") or "").strip()
-    brand_name = str(fields.get("brand_name") or "").strip()
-    title = str(fields.get("draft_title") or product_name or "Pinterest Pin").strip()
-    if brand_name and brand_name.lower() not in title.lower():
-        title = f"{brand_name} {title}".strip()
-    title = title[:100]
-
-    description = str(
-        fields.get("draft_description")
-        or fields.get("product_description")
-        or fields.get("source_description")
-        or fields.get("notes")
-        or title
-    ).strip()
-    tags = str(fields.get("draft_tags") or fields.get("keywords") or fields.get("tags") or "").strip()
-    if not tags:
-        tags = "#Pinterest"
-    alt_text = str(fields.get("draft_alt_text") or fields.get("alt_text") or f"{title} product image").strip()
-    return {
-        "title": title,
-        "description": description,
-        "tags": tags,
-        "alt_text": alt_text,
-    }

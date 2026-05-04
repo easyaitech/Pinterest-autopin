@@ -34,6 +34,7 @@ def config_payload() -> dict:
             "pins": {
                 "table_id": "pins",
                 "fields": {
+                    "product": "fld_product",
                     "status": "fld_status",
                     "scheduled_at": "fld_scheduled",
                     "publisher_run_id": "fld_publisher",
@@ -55,9 +56,16 @@ def config_payload() -> dict:
                     "final_tags": "fld_final_tags",
                     "final_alt_text": "fld_final_alt_text",
                     "final_board": "fld_final_board",
-                    "product_link": "fld_product_link",
                     "pin_url": "fld_pin_url",
                     "published_at": "fld_published_at",
+                },
+            },
+            "products": {
+                "table_id": "products",
+                "fields": {
+                    "product_name": "fld_product_name",
+                    "product_description": "fld_product_description",
+                    "product_link": "fld_product_link",
                 },
             },
             "brands": {"table_id": "brands", "fields": {}},
@@ -112,6 +120,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
@@ -151,6 +160,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
@@ -193,6 +203,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
@@ -234,6 +245,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
@@ -272,6 +284,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
@@ -307,6 +320,7 @@ class OnboardingTest(unittest.TestCase):
 
             with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
                 worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                worker_cls.from_config.return_value.product_check.return_value.errors = ()
                 onboarded = run_onboarding(
                     config_path=config_path,
                     local_dev=True,

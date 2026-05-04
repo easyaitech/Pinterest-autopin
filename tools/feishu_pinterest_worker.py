@@ -16,13 +16,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from pinterest_autopin.hermes_runtime import RuntimeErrorConfig
 from pinterest_autopin.onboarding import DEFAULT_CONFIG, run_onboarding
+from pinterest_autopin.feishu_schema import FeishuSchemaError, setup_feishu_base
 from pinterest_autopin.worker import FeishuPinterestWorker, WorkerResult
 from pinterest_autopin.worker_config import LOCK_MODE_HERMES_SINGLETON, ConfigError, load_worker_config
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Feishu-backed Pinterest workflow.")
-    parser.add_argument("command", choices=("onboard", "doctor", "prepare", "publish"))
+    parser.add_argument("command", choices=("onboard", "setup-base", "doctor", "prepare", "publish"))
     parser.add_argument(
         "--config",
         default=str(DEFAULT_CONFIG),
@@ -31,6 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Maximum records to process.")
     parser.add_argument("--local-dev", action="store_true", help="Use explicit local:<uuid> run identity.")
     parser.add_argument("--chrome-profile", default="", help="Override Pinterest Chrome profile path.")
+    parser.add_argument("--base-url", default="", help="Feishu Base or Wiki shared URL for setup-base.")
+    parser.add_argument("--feishu-cli", default="lark-cli", help="Feishu/Lark CLI binary for setup-base.")
     parser.add_argument(
         "--use-chrome-cdp",
         action="store_true",
@@ -96,6 +99,22 @@ def main() -> int:
             target=args.target,
         )
         return print_json(payload, 0 if payload["ok"] else 1)
+
+    if args.command == "setup-base":
+        if not args.base_url:
+            return print_json(
+                {"ok": False, "action": "setup-base", "errors": ["--base-url is required"]},
+                1,
+            )
+        try:
+            result = setup_feishu_base(
+                base_url=args.base_url,
+                config_path=Path(args.config),
+                feishu_cli=args.feishu_cli,
+            )
+        except FeishuSchemaError as exc:
+            return print_json({"ok": False, "action": "setup-base", "errors": [str(exc)]}, 1)
+        return print_json(result.as_dict(), 0)
 
     try:
         config = load_worker_config(Path(args.config))

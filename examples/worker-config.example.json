@@ -20,6 +20,7 @@
     "pins": {
       "table_id": "<local-pins-table-id>",
       "fields": {
+        "product": "<field-product>",
         "status": "<field-status>",
         "scheduled_at": "<field-scheduled-at>",
         "publisher_run_id": "<field-publisher-run-id>",
@@ -30,8 +31,12 @@
         "prepare_expires_at": "<field-prepare-expires-at>",
         "last_error": "<field-last-error>",
         "product_name": "<field-product-name>",
+        "product_description": "<field-product-description>",
         "product_link": "<field-product-link>",
         "pinterest_board": "<field-pinterest-board>",
+        "brand_name": "<field-brand-name>",
+        "keywords": "<field-keywords>",
+        "notes": "<field-notes>",
         "source_image": "<field-source-image>",
         "processed_image": "<field-processed-image>",
         "draft_title": "<field-draft-title>",
@@ -46,6 +51,17 @@
         "final_image": "<field-final-image>",
         "pin_url": "<field-pin-url>",
         "published_at": "<field-published-at>"
+      }
+    },
+    "products": {
+      "table_id": "<local-products-table-id>",
+      "fields": {
+        "product_name": "<field-product-name>",
+        "product_description": "<field-product-description>",
+        "product_link": "<field-product-link>",
+        "brand_name": "<field-product-brand-name>",
+        "keywords": "<field-product-keywords>",
+        "notes": "<field-product-notes>"
       }
     },
     "runs": {

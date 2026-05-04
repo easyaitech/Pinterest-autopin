@@ -48,6 +48,7 @@ class WorkerConfig:
     brands: TableConfig
     runs: TableConfig
     runtime_locks: TableConfig
+    products: TableConfig = field(default_factory=lambda: TableConfig(""))
     feishu_cli: str = "feishu"
     feishu_cli_flavor: str = "auto"
     status_values: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_STATUS_VALUES))
@@ -101,6 +102,7 @@ def worker_config_from_dict(payload: Mapping[str, Any]) -> WorkerConfig:
     return WorkerConfig(
         app_token=str(payload.get("app_token", "")).strip(),
         pins=_table(tables, "pins"),
+        products=_table(tables, "products"),
         brands=_table(tables, "brands"),
         runs=_table(tables, "runs"),
         runtime_locks=_table(tables, "runtime_locks"),
@@ -126,6 +128,7 @@ def validate_worker_config(config: WorkerConfig) -> list[str]:
         errors.append("app_token must be replaced in a local ignored config file")
     for table_name, table in {
         "brands": config.brands,
+        "products": config.products,
         "pins": config.pins,
         "runs": config.runs,
         "runtime_locks": config.runtime_locks,
@@ -147,6 +150,7 @@ def validate_worker_config(config: WorkerConfig) -> list[str]:
         "prepare_run_id",
         "prepare_expires_at",
         "last_error",
+        "product",
         "source_image",
         "processed_image",
         "draft_title",
@@ -159,12 +163,18 @@ def validate_worker_config(config: WorkerConfig) -> list[str]:
         "final_tags",
         "final_alt_text",
         "final_board",
-        "product_link",
         "pin_url",
         "published_at",
     ]
     for missing in config.pins.require_fields(required_pin_fields):
         errors.append(f"pins.fields.{missing} is required")
+    required_product_fields = [
+        "product_name",
+        "product_description",
+        "product_link",
+    ]
+    for missing in config.products.require_fields(required_product_fields):
+        errors.append(f"products.fields.{missing} is required")
     for missing in config.runtime_locks.require_fields(
         ["lock_name", "owner_run_id", "owner_hermes_run_id", "lock_expires_at", "locked_at"]
     ):

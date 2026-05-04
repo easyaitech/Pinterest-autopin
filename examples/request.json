@@ -4,5 +4,6 @@
   "board": "Example Board",
   "link": "https://example.com/product",
   "description": "Example Pin description for local validation.",
-  "altText": "Example accessible image description."
+  "altText": "Example accessible image description.",
+  "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
 }
