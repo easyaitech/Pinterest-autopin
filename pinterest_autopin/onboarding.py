@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from .skill_update import check_skill_update
 from .worker import FeishuPinterestWorker
 from .worker_config import (
     LOCK_MODE_FEISHU_ATOMIC,
@@ -41,6 +42,7 @@ LARK_REQUIRED_SCOPES = (
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 Which = Callable[[str], Optional[str]]
+UpdateChecker = Callable[[], dict[str, Any]]
 
 
 def run_onboarding(
@@ -48,6 +50,7 @@ def run_onboarding(
     config_path: str | Path | None = None,
     local_dev: bool = False,
     chrome_profile: str = "",
+    check_updates: bool = True,
     check_pinterest_login: bool = True,
     prepare_singleton_confirmed: bool = False,
     publish_singleton_confirmed: bool = False,
@@ -56,6 +59,7 @@ def run_onboarding(
     command_runner: CommandRunner | None = None,
     which: Which | None = None,
     cdp_reachable: Callable[[], bool] | None = None,
+    update_checker: UpdateChecker | None = None,
 ) -> dict[str, Any]:
     runtime_env = dict(env or os.environ)
     run = command_runner or subprocess.run
@@ -64,6 +68,34 @@ def run_onboarding(
     steps: list[dict[str, Any]] = []
     resolved_config = Path(config_path) if config_path else DEFAULT_CONFIG
     config: WorkerConfig | None = None
+
+    skill_update = (
+        (update_checker or check_skill_update)()
+        if check_updates
+        else {"checked": False, "updateAvailable": False, "reason": "Skipped by --skip-skill-update-check"}
+    )
+    update_available = bool(skill_update.get("updateAvailable"))
+    steps.append(
+        _step(
+            "skill_update",
+            "Check Pinterest AutoPin skill version",
+            "action_required" if update_available else "complete",
+            str(skill_update.get("reason") or "Skill update check completed."),
+            user_action=(
+                "A newer Pinterest AutoPin skill is available. Approve the upgrade before continuing."
+                if update_available
+                else ""
+            ),
+            agent_action=(
+                "Ask the user for upgrade approval, then run: "
+                + str(skill_update.get("upgradeCommand", ""))
+                if update_available
+                else ""
+            ),
+            blocking=False,
+            details=skill_update,
+        )
+    )
 
     node_ok = bool(which_bin("node"))
     playwright_ok = (REPO_ROOT / "node_modules" / "playwright").exists()

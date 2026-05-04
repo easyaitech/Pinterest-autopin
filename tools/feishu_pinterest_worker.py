@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-dev", action="store_true", help="Use explicit local:<uuid> run identity.")
     parser.add_argument("--chrome-profile", default="", help="Override Pinterest Chrome profile path.")
     parser.add_argument(
+        "--skip-skill-update-check",
+        action="store_true",
+        help="Do not check the public skill version during onboarding.",
+    )
+    parser.add_argument(
         "--skip-pinterest-login-check",
         action="store_true",
         help="Do not run the live Pinterest check-login step during onboarding.",
@@ -78,6 +83,7 @@ def main() -> int:
             config_path=Path(args.config),
             local_dev=args.local_dev,
             chrome_profile=args.chrome_profile,
+            check_updates=not args.skip_skill_update_check,
             check_pinterest_login=not args.skip_pinterest_login_check,
             prepare_singleton_confirmed=args.prepare_singleton_confirmed,
             publish_singleton_confirmed=args.publish_singleton_confirmed,

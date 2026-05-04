@@ -275,6 +275,7 @@ python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-
 ```
 
 Run `onboard` first in Hermes. It returns a structured checklist that tells the agent and user exactly which setup step is still missing: dependency install, Hermes run identity, Feishu CLI auth, local Feishu config, Feishu table doctor, Pinterest Chrome profile, Pinterest login, and publish singleton protection.
+It also checks the public Pinterest AutoPin Skill version. If a newer version is available, onboarding returns a non-blocking `skill_update` action so the agent can ask the user whether to upgrade before continuing.
 
 Use it as a gate before each phase:
 
@@ -286,6 +287,14 @@ python3 tools/feishu_pinterest_worker.py onboard \
 python3 tools/feishu_pinterest_worker.py onboard \
   --config .gstack/feishu-worker-config.json \
   --target publish
+```
+
+For fully offline setup checks, skip the public version lookup:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --skip-skill-update-check
 ```
 
 For local setup checks:

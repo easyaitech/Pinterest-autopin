@@ -1,5 +1,6 @@
 ---
 name: pinterest-autopin
+version: 1.3.0
 description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository, including preparing the request JSON, using a dedicated Chrome profile, running dry-run form fill, and doing a real publish only when explicitly requested.
 ---
 
@@ -17,6 +18,7 @@ python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-
 
 Treat `readyForPrepare: true` as permission to run content generation. Treat `readyForPublish: true` as permission to schedule final publishing. If `nextActions` is not empty, guide the user through those actions first.
 Use `--target prepare` before generation jobs and `--target publish` before final publish jobs. If official `lark-cli` is used, pass the same `--prepare-singleton-confirmed` or `--publish-singleton-confirmed` flag to the real Hermes worker command, unless the local config already sets the matching `*_lock_mode` to `hermes_singleton`.
+If onboarding returns `skill_update`, ask the user whether to upgrade before running mutable workflow commands. Only run the returned upgrade command after explicit approval.
 
 ## Ground rules
 

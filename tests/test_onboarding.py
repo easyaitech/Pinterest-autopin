@@ -14,6 +14,16 @@ def completed(stdout: dict, returncode: int = 0) -> subprocess.CompletedProcess[
     return subprocess.CompletedProcess([], returncode, stdout=json.dumps(stdout), stderr="")
 
 
+def no_update() -> dict:
+    return {
+        "checked": True,
+        "updateAvailable": False,
+        "localVersion": "1.3.0",
+        "latestVersion": "1.3.0",
+        "reason": "Pinterest AutoPin skill is current at 1.3.0.",
+    }
+
+
 def config_payload() -> dict:
     return {
         "app_token": "app",
@@ -78,6 +88,7 @@ class OnboardingTest(unittest.TestCase):
                     {"ok": True, "chromeProfile": str(Path(temp_dir) / "profile")}
                 ),
                 cdp_reachable=lambda: False,
+                update_checker=no_update,
             )
 
         self.assertFalse(payload["ok"])
@@ -110,6 +121,7 @@ class OnboardingTest(unittest.TestCase):
                     which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
                     command_runner=runner,
                     cdp_reachable=lambda: False,
+                    update_checker=no_update,
                 )
 
         self.assertTrue(payload["ok"])
@@ -147,6 +159,7 @@ class OnboardingTest(unittest.TestCase):
                     which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
                     command_runner=runner,
                     cdp_reachable=lambda: True,
+                    update_checker=no_update,
                 )
 
         self.assertTrue(payload["ok"])
@@ -183,11 +196,37 @@ class OnboardingTest(unittest.TestCase):
                     target="prepare",
                     which=lambda name: "/usr/bin/" + name if name in {"node", "feishu"} else None,
                     command_runner=runner,
+                    update_checker=no_update,
                 )
 
         self.assertTrue(onboarded["ok"])
         self.assertTrue(onboarded["readyForPrepare"])
         self.assertNotIn("feishu_auth", [item["id"] for item in onboarded["steps"]])
+
+    def test_update_available_returns_nonblocking_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = run_onboarding(
+                config_path=Path(temp_dir) / "missing.json",
+                local_dev=True,
+                check_pinterest_login=False,
+                which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
+                command_runner=lambda *args, **kwargs: completed(
+                    {"ok": True, "chromeProfile": str(Path(temp_dir) / "profile")}
+                ),
+                update_checker=lambda: {
+                    "checked": True,
+                    "updateAvailable": True,
+                    "localVersion": "1.2.0",
+                    "latestVersion": "1.3.0",
+                    "reason": "Pinterest AutoPin skill 1.2.0 can be upgraded to 1.3.0.",
+                    "upgradeCommand": "git pull --ff-only && npm install",
+                },
+            )
+
+        update_step = next(step for step in payload["steps"] if step["id"] == "skill_update")
+        self.assertEqual("action_required", update_step["status"])
+        self.assertFalse(update_step["blocking"])
+        self.assertIn("skill_update", [item["id"] for item in payload["nextActions"]])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ __all__ = [
     "pin_draft",
     "publisher",
     "runtime_lock",
+    "skill_update",
     "worker_config",
     "worker_state",
 ]
