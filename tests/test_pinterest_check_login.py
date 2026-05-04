@@ -63,6 +63,53 @@ class PinterestCheckLoginTest(unittest.TestCase):
         self.assertIn("--mode", command)
         self.assertIn("check-login", command)
 
+    @patch("pinterest_autopin.publisher.subprocess.run")
+    def test_publisher_check_login_can_use_cdp_without_profile(self, run_mock) -> None:
+        from pinterest_autopin.publisher import PinterestPublisher
+
+        run_mock.return_value = subprocess.CompletedProcess(
+            ["cmd"], 0, stdout='{"ok": true, "mode": "check-login"}', stderr=""
+        )
+
+        result = PinterestPublisher(timeout=5).check_login(
+            chrome_profile="/tmp/profile",
+            use_chrome_cdp=True,
+        )
+
+        self.assertTrue(result.ok)
+        command = run_mock.call_args.args[0]
+        self.assertIn("--no-default-chrome-profile", command)
+        self.assertNotIn("--chrome-profile", command)
+
+    @patch("pinterest_autopin.publisher.subprocess.run")
+    def test_publisher_publish_can_use_cdp_without_profile(self, run_mock) -> None:
+        from pinterest_autopin.publisher import PinterestPublisher
+
+        run_mock.return_value = subprocess.CompletedProcess(
+            ["cmd"], 0, stdout='{"ok": true, "pinUrl": "https://www.pinterest.com/pin/1/"}', stderr=""
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "request.json"
+            result = PinterestPublisher(timeout=5).publish(
+                {
+                    "image": "/tmp/image.jpg",
+                    "title": "Title",
+                    "board": "Board",
+                    "chromeProfile": "/tmp/profile-from-json",
+                },
+                input_path=input_path,
+                chrome_profile="/tmp/profile",
+                use_chrome_cdp=True,
+            )
+            written_payload = input_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result.ok)
+        command = run_mock.call_args.args[0]
+        self.assertIn("--no-default-chrome-profile", command)
+        self.assertNotIn("--chrome-profile", command)
+        self.assertNotIn("chromeProfile", written_payload)
+
 
 if __name__ == "__main__":
     unittest.main()

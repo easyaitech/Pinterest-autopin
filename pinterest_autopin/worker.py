@@ -38,10 +38,17 @@ class RecordStore(Protocol):
 
 
 class PublisherBoundary(Protocol):
-    def check_login(self, *, chrome_profile: str = "") -> PublisherResult:
+    def check_login(self, *, chrome_profile: str = "", use_chrome_cdp: bool = False) -> PublisherResult:
         ...
 
-    def publish(self, request: Mapping[str, Any], *, input_path: Path, chrome_profile: str = "") -> PublisherResult:
+    def publish(
+        self,
+        request: Mapping[str, Any],
+        *,
+        input_path: Path,
+        chrome_profile: str = "",
+        use_chrome_cdp: bool = False,
+    ) -> PublisherResult:
         ...
 
 
@@ -74,11 +81,13 @@ class FeishuPinterestWorker:
         *,
         local_dev: bool = False,
         chrome_profile: str = "",
+        chrome_cdp: bool = False,
     ) -> "FeishuPinterestWorker":
         runtime = build_runtime_context(
             local_dev=local_dev,
             required_secrets=config.required_hermes_secrets,
             chrome_profile=chrome_profile or None,
+            chrome_cdp=chrome_cdp,
         )
         store = FeishuCli(
             binary=config.feishu_cli,
@@ -149,7 +158,10 @@ class FeishuPinterestWorker:
         processed = 0
         errors: list[str] = []
         try:
-            login = self.publisher.check_login(chrome_profile=self.runtime.chrome_profile)
+            login = self.publisher.check_login(
+                chrome_profile=self.runtime.chrome_profile,
+                use_chrome_cdp=self.runtime.chrome_cdp,
+            )
             if not login.ok:
                 errors.extend(login.errors or ("Pinterest check-login failed",))
                 self._create_run("publish", ok=False, error="; ".join(errors))
@@ -181,6 +193,7 @@ class FeishuPinterestWorker:
                         request,
                         input_path=self.runtime.temp_dir / f"{record_id}-publish.json",
                         chrome_profile=self.runtime.chrome_profile,
+                        use_chrome_cdp=self.runtime.chrome_cdp,
                     )
                 except Exception as exc:  # noqa: BLE001
                     result = PublisherResult(False, "final", errors=(str(exc),))

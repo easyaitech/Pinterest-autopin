@@ -188,6 +188,30 @@ or:
 npm run pin:check-login
 ```
 
+When `check-login` succeeds and you are preparing the Feishu/Hermes workflow, continue with worker onboarding instead of asking for one-off Pin fields:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target publish
+```
+
+If the dedicated Chrome profile is already open and CDP is confirmed on `127.0.0.1:9222`, use the same explicit CDP mode for onboarding and publish:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target publish \
+  --use-chrome-cdp
+
+python3 tools/feishu_pinterest_worker.py publish \
+  --config .gstack/feishu-worker-config.json \
+  --use-chrome-cdp
+```
+
+Do not ask for image path, Pin title, Board, link, description, or alt text at this stage.
+Only collect `image`, `title`, `board`, `link`, `description`, and `altText` when you are intentionally running a one-off `test` or `final` publish flow.
+
 Publish for real:
 
 ```bash
@@ -274,8 +298,27 @@ python3 tools/feishu_pinterest_worker.py prepare --config .gstack/feishu-worker-
 python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-config.json --limit 1
 ```
 
+Add `--use-chrome-cdp` to `onboard` and `publish` when the Pinterest dedicated Chrome is already open with CDP on `127.0.0.1:9222`. Do not rely on onboarding CDP success unless publish will use the same flag.
+
 Run `onboard` first in Hermes. It returns a structured checklist that tells the agent and user exactly which setup step is still missing: dependency install, Hermes run identity, Feishu CLI auth, local Feishu config, Feishu table doctor, Pinterest Chrome profile, Pinterest login, and publish singleton protection.
 It also checks the public Pinterest AutoPin Skill version. If a newer version is available, onboarding returns a non-blocking `skill_update` action so the agent can ask the user whether to upgrade before continuing.
+
+After Pinterest login is confirmed, the normal next step is Feishu setup. If onboarding reports `feishu_cli` or `feishu_auth`, install `lark-cli`, keep it on `PATH`, and authorize the required scopes:
+
+```bash
+lark-cli auth login --scope "base:app:read base:table:read base:field:read base:record:read base:record:create base:record:update docs:document.media:upload drive:file:download wiki:node:read"
+```
+
+The local config should stay ignored, for example `.gstack/feishu-worker-config.json`, and should use the official CLI settings:
+
+```json
+{
+  "feishu_cli": "lark-cli",
+  "feishu_cli_flavor": "lark",
+  "prepare_lock_mode": "hermes_singleton",
+  "publish_lock_mode": "hermes_singleton"
+}
+```
 
 Use it as a gate before each phase:
 

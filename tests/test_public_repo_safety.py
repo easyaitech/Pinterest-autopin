@@ -73,6 +73,19 @@ class PublicRepoSafetyTest(unittest.TestCase):
         self.assertIn("Never commit Pinterest or Feishu account-specific data", readme)
         self.assertIn(".gstack/feishu-worker-config.json", readme)
 
+    def test_docs_route_login_success_to_feishu_onboarding(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        skill = (
+            REPO_ROOT / ".agents" / "skills" / "pinterest-autopin" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for text in (readme, skill):
+            with self.subTest(doc=("skill" if text == skill else "readme")):
+                self.assertIn("tools/feishu_pinterest_worker.py onboard", text)
+                self.assertIn("lark-cli auth login --scope", text)
+                self.assertIn('"feishu_cli": "lark-cli"', text)
+                self.assertIn("Do not ask for image path", text)
+
 
 if __name__ == "__main__":
     unittest.main()

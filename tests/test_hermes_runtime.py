@@ -39,12 +39,26 @@ class HermesRuntimeTest(unittest.TestCase):
                 "HERMES_JOB_ID": "job-1",
                 "PINTEREST_AUTOPIN_TMPDIR": temp_dir,
                 "PINTEREST_AUTOPIN_CHROME_PROFILE": "/tmp/profile",
+                "PINTEREST_AUTOPIN_USE_CHROME_CDP": "true",
             }
             context = build_runtime_context(env=env)
 
         self.assertEqual("run-1", context.run_id)
         self.assertEqual("/tmp/profile", context.chrome_profile)
+        self.assertTrue(context.chrome_cdp)
         self.assertIn("run-1", str(Path(context.temp_dir)))
+
+    def test_explicit_chrome_cdp_overrides_env(self) -> None:
+        env = {
+            "HERMES_RUN_ID": "run-1",
+            "HERMES_AGENT_ID": "agent-1",
+            "HERMES_JOB_ID": "job-1",
+            "PINTEREST_AUTOPIN_USE_CHROME_CDP": "true",
+        }
+
+        context = build_runtime_context(env=env, chrome_cdp=False)
+
+        self.assertFalse(context.chrome_cdp)
 
 
 if __name__ == "__main__":

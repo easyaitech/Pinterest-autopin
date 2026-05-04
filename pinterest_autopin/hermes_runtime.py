@@ -19,6 +19,7 @@ AGENT_ID_KEYS = ("HERMES_AGENT_ID", "AGENT_ID")
 JOB_ID_KEYS = ("HERMES_JOB_ID", "HERMES_SCHEDULE_ID", "JOB_ID")
 TEMP_DIR_KEYS = ("PINTEREST_AUTOPIN_TMPDIR", "HERMES_TMPDIR", "HERMES_TEMP_DIR", "TMPDIR")
 PROFILE_KEYS = ("PINTEREST_AUTOPIN_CHROME_PROFILE", "CHROME_PROFILE")
+CDP_KEYS = ("PINTEREST_AUTOPIN_USE_CHROME_CDP", "USE_CHROME_CDP")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class RuntimeContext:
     hermes_job_id: str
     temp_dir: Path
     chrome_profile: str
+    chrome_cdp: bool = False
     local_dev: bool = False
 
 
@@ -44,6 +46,11 @@ def ensure_required_secrets(env: Mapping[str, str], required: Sequence[str]) -> 
     return [name for name in required if not env.get(name, "").strip()]
 
 
+def env_flag(env: Mapping[str, str], keys: Sequence[str]) -> bool:
+    value = first_env(env, keys).lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def build_runtime_context(
     *,
     env: Mapping[str, str] | None = None,
@@ -51,6 +58,7 @@ def build_runtime_context(
     required_secrets: Sequence[str] = (),
     temp_dir: str | None = None,
     chrome_profile: str | None = None,
+    chrome_cdp: bool | None = None,
 ) -> RuntimeContext:
     runtime_env = env or os.environ
     missing_secrets = ensure_required_secrets(runtime_env, required_secrets)
@@ -78,6 +86,7 @@ def build_runtime_context(
     run_temp_dir.mkdir(parents=True, exist_ok=True)
 
     profile = chrome_profile if chrome_profile is not None else first_env(runtime_env, PROFILE_KEYS)
+    use_cdp = env_flag(runtime_env, CDP_KEYS) if chrome_cdp is None else chrome_cdp
 
     return RuntimeContext(
         run_id=hermes_run_id,
@@ -86,5 +95,6 @@ def build_runtime_context(
         hermes_job_id=hermes_job_id,
         temp_dir=run_temp_dir,
         chrome_profile=profile,
+        chrome_cdp=use_cdp,
         local_dev=local_dev,
     )

@@ -80,15 +80,26 @@ class FakePublisher:
         self.publish_ok = publish_ok
         self.published = False
         self.last_request = {}
+        self.login_cdp = False
+        self.publish_cdp = False
 
-    def check_login(self, *, chrome_profile: str = "") -> PublisherResult:
+    def check_login(self, *, chrome_profile: str = "", use_chrome_cdp: bool = False) -> PublisherResult:
+        self.login_cdp = use_chrome_cdp
         if self.login_ok:
             return PublisherResult(True, "check-login")
         return PublisherResult(False, "check-login", errors=("login required",))
 
-    def publish(self, request, *, input_path: Path, chrome_profile: str = "") -> PublisherResult:
+    def publish(
+        self,
+        request,
+        *,
+        input_path: Path,
+        chrome_profile: str = "",
+        use_chrome_cdp: bool = False,
+    ) -> PublisherResult:
         self.published = True
         self.last_request = dict(request)
+        self.publish_cdp = use_chrome_cdp
         if self.publish_ok:
             return PublisherResult(True, "final", pin_url="https://www.pinterest.com/pin/123/")
         return PublisherResult(False, "final", errors=("publish failed",))
@@ -113,6 +124,18 @@ def runtime(temp_dir: str) -> RuntimeContext:
         hermes_job_id="job-1",
         temp_dir=Path(temp_dir),
         chrome_profile="/tmp/profile",
+    )
+
+
+def cdp_runtime(temp_dir: str) -> RuntimeContext:
+    return RuntimeContext(
+        run_id="run-1",
+        hermes_run_id="run-1",
+        hermes_agent_id="agent-1",
+        hermes_job_id="job-1",
+        temp_dir=Path(temp_dir),
+        chrome_profile="/tmp/profile",
+        chrome_cdp=True,
     )
 
 
@@ -209,6 +232,18 @@ class WorkerPublishTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertTrue(publisher.published)
         self.assertEqual("已发布", store.pin["fields"]["status"])
+
+    def test_publish_passes_cdp_mode_to_login_and_final_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = FakeStore()
+            publisher = FakePublisher()
+            worker = FeishuPinterestWorker(config(), cdp_runtime(temp_dir), store, publisher)
+
+            result = worker.publish()
+
+        self.assertTrue(result.ok)
+        self.assertTrue(publisher.login_cdp)
+        self.assertTrue(publisher.publish_cdp)
 
 
 if __name__ == "__main__":

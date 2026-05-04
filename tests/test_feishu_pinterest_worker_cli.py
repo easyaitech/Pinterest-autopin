@@ -9,6 +9,22 @@ from pathlib import Path
 
 
 class FeishuPinterestWorkerCliTest(unittest.TestCase):
+    def test_help_documents_chrome_cdp_mode(self) -> None:
+        completed = subprocess.run(
+            [
+                "python3",
+                "tools/feishu_pinterest_worker.py",
+                "--help",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(0, completed.returncode)
+        self.assertIn("--use-chrome-cdp", completed.stdout)
+
     def test_missing_hermes_identity_fails_before_actions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.json"

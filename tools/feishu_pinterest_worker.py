@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-dev", action="store_true", help="Use explicit local:<uuid> run identity.")
     parser.add_argument("--chrome-profile", default="", help="Override Pinterest Chrome profile path.")
     parser.add_argument(
+        "--use-chrome-cdp",
+        action="store_true",
+        help="Attach to the already-open Chrome CDP session on 127.0.0.1:9222 instead of launching a profile.",
+    )
+    parser.add_argument(
         "--skip-skill-update-check",
         action="store_true",
         help="Do not check the public skill version during onboarding.",
@@ -83,6 +88,7 @@ def main() -> int:
             config_path=Path(args.config),
             local_dev=args.local_dev,
             chrome_profile=args.chrome_profile,
+            use_chrome_cdp=args.use_chrome_cdp,
             check_updates=not args.skip_skill_update_check,
             check_pinterest_login=not args.skip_pinterest_login_check,
             prepare_singleton_confirmed=args.prepare_singleton_confirmed,
@@ -102,6 +108,7 @@ def main() -> int:
             config,
             local_dev=args.local_dev,
             chrome_profile=args.chrome_profile,
+            chrome_cdp=args.use_chrome_cdp,
         )
         if args.command == "doctor":
             result = worker.doctor()

@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_CLI = REPO_ROOT / "tools" / "pinterest_publish_pin.py"
+PROFILE_KEYS = ("chromeProfile", "chrome_profile", "chrome-profile")
 
 
 class PublisherError(RuntimeError):
@@ -31,14 +32,27 @@ class PinterestPublisher:
     cli_path: Path = PUBLISH_CLI
     timeout: int = 600
 
-    def check_login(self, *, chrome_profile: str = "") -> PublisherResult:
+    def check_login(self, *, chrome_profile: str = "", use_chrome_cdp: bool = False) -> PublisherResult:
         command = [str(self.cli_path), "--mode", "check-login", "--timeout", str(self.timeout)]
-        if chrome_profile:
+        if use_chrome_cdp:
+            command.append("--no-default-chrome-profile")
+        elif chrome_profile:
             command.extend(["--chrome-profile", chrome_profile])
         return self._run(command, "check-login")
 
-    def publish(self, request: Mapping[str, Any], *, input_path: Path, chrome_profile: str = "") -> PublisherResult:
-        input_path.write_text(json.dumps(dict(request), ensure_ascii=True, indent=2), encoding="utf-8")
+    def publish(
+        self,
+        request: Mapping[str, Any],
+        *,
+        input_path: Path,
+        chrome_profile: str = "",
+        use_chrome_cdp: bool = False,
+    ) -> PublisherResult:
+        payload = dict(request)
+        if use_chrome_cdp:
+            for key in PROFILE_KEYS:
+                payload.pop(key, None)
+        input_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
         command = [
             str(self.cli_path),
             "--mode",
@@ -48,7 +62,9 @@ class PinterestPublisher:
             "--timeout",
             str(self.timeout),
         ]
-        if chrome_profile:
+        if use_chrome_cdp:
+            command.append("--no-default-chrome-profile")
+        elif chrome_profile:
             command.extend(["--chrome-profile", chrome_profile])
         return self._run(command, "final")
 

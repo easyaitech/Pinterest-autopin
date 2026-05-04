@@ -59,6 +59,7 @@ def run_onboarding(
     command_runner: CommandRunner | None = None,
     which: Which | None = None,
     cdp_reachable: Callable[[], bool] | None = None,
+    use_chrome_cdp: bool = False,
     update_checker: UpdateChecker | None = None,
 ) -> dict[str, Any]:
     runtime_env = dict(env or os.environ)
@@ -238,11 +239,18 @@ def run_onboarding(
         )
     )
 
-    pinterest_login = (
-        _check_pinterest_login(run, profile_path if profile_exists else "")
-        if check_pinterest_login
-        else {"ok": False, "skipped": True, "reason": "Skipped by --skip-pinterest-login-check"}
-    )
+    chrome_cdp_reachable = _safe_cdp_reachable(cdp_reachable or _chrome_cdp_reachable)
+    use_cdp_for_login = use_chrome_cdp and chrome_cdp_reachable
+    if not check_pinterest_login:
+        pinterest_login = {"ok": False, "skipped": True, "reason": "Skipped by --skip-pinterest-login-check"}
+    elif use_chrome_cdp and not chrome_cdp_reachable:
+        pinterest_login = {"ok": False, "reason": "Chrome CDP is not reachable at 127.0.0.1:9222"}
+    else:
+        pinterest_login = _check_pinterest_login(
+            run,
+            profile_path if profile_exists else "",
+            use_cdp=use_cdp_for_login,
+        )
     steps.append(
         _step(
             "pinterest_login",
@@ -254,11 +262,15 @@ def run_onboarding(
                 else "Sign in to Pinterest in the dedicated Chrome profile, then rerun onboarding."
             ),
             user_action="Open the dedicated Chrome profile, sign in to Pinterest, and keep that profile available to Hermes.",
-            agent_action=_pinterest_login_agent_action(profile_path),
+            agent_action=_pinterest_login_agent_action(profile_path, use_cdp_for_login),
             blocking=True,
             details={
                 "checked": not pinterest_login.get("skipped", False),
                 "chromeProfile": profile_path,
+                "chromeCdpRequested": use_chrome_cdp,
+                "chromeCdpReachable": chrome_cdp_reachable,
+                "connection": "cdp" if use_cdp_for_login else "profile",
+                "publishArgs": ["--use-chrome-cdp"] if use_cdp_for_login else [],
                 "reason": pinterest_login.get("reason", ""),
             },
         )
@@ -429,26 +441,30 @@ def _print_chrome_profile(run: CommandRunner, chrome_profile: str) -> dict[str, 
     return payload if isinstance(payload, dict) else {"ok": False}
 
 
-def _pinterest_login_agent_action(profile_path: str) -> str:
+def _pinterest_login_agent_action(profile_path: str, use_cdp: bool = False) -> str:
+    if use_cdp:
+        return "python3 tools/pinterest_publish_pin.py --mode check-login --no-default-chrome-profile"
     if profile_path:
         return f"python3 tools/pinterest_publish_pin.py --mode check-login --chrome-profile {profile_path}"
     return "python3 tools/pinterest_publish_pin.py --mode check-login"
 
 
-def _check_pinterest_login(run: CommandRunner, chrome_profile: str) -> dict[str, Any]:
-    if not chrome_profile:
+def _check_pinterest_login(run: CommandRunner, chrome_profile: str, *, use_cdp: bool = False) -> dict[str, Any]:
+    if not chrome_profile and not use_cdp:
         return {"ok": False, "skipped": True, "reason": "Dedicated Chrome profile is not ready"}
+    command = [
+        sys.executable,
+        str(PINTEREST_CLI),
+        "--mode",
+        "check-login",
+    ]
+    if use_cdp:
+        command.append("--no-default-chrome-profile")
+    else:
+        command.extend(["--chrome-profile", chrome_profile])
+    command.extend(["--timeout", "60"])
     completed = run(
-        [
-            sys.executable,
-            str(PINTEREST_CLI),
-            "--mode",
-            "check-login",
-            "--chrome-profile",
-            chrome_profile,
-            "--timeout",
-            "60",
-        ],
+        command,
         capture_output=True,
         text=True,
         check=False,
@@ -463,6 +479,13 @@ def _check_pinterest_login(run: CommandRunner, chrome_profile: str) -> dict[str,
         "ok": completed.returncode == 0 and bool(isinstance(payload, dict) and payload.get("ok")),
         "reason": "; ".join(str(error) for error in (errors or [])[:2]),
     }
+
+
+def _safe_cdp_reachable(check: Callable[[], bool]) -> bool:
+    try:
+        return bool(check())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _chrome_cdp_reachable() -> bool:

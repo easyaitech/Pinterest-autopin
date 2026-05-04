@@ -1,12 +1,12 @@
 ---
 name: pinterest-autopin
-version: 1.3.0
-description: Use this skill when the user wants to validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository, including preparing the request JSON, using a dedicated Chrome profile, running dry-run form fill, and doing a real publish only when explicitly requested.
+version: 1.3.3
+description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
 ---
 
 # Pinterest AutoPin
 
-Use this skill to create one Pinterest Pin with the automation in the `easyaitech/Pinterest-autopin` repo.
+Use this skill to operate the Pinterest AutoPin automation in the `easyaitech/Pinterest-autopin` repo, including Feishu/Hermes onboarding and one-off Pin validation or publishing.
 
 This is the Agent Skill interface. The CLI interface lives in `tools/pinterest_publish_pin.py`, and both interfaces share the same Playwright publisher in `publish_playwright.js`.
 
@@ -25,7 +25,8 @@ If onboarding returns `skill_update`, ask the user whether to upgrade before run
 - Never ask for or store Pinterest credentials. Use a dedicated Chrome profile and let the user sign in directly inside Chrome if needed.
 - Never write Pinterest account names, real board names, cookies, Chrome profile contents, or real request JSON into this repository. Keep those in local ignored files or temp files only.
 - Do not publish for real unless the user explicitly asks to publish, post, send, or run final mode.
-- If the user asks to preview, test, verify, or prepare, use `test` mode.
+- If the user asks to preview, test, or verify one explicit Pin, use `test` mode.
+- If the user asks for Feishu/Hermes `prepare` or workflow setup, run onboarding first and follow its `nextActions`; do not collect direct Pin fields unless they explicitly request one-off Pin test/final mode.
 - If required fields are missing for `test` or `final`, ask for the missing values instead of inventing them.
 - Always use the CLI wrapper and its JSON output; do not call the Playwright script directly unless debugging the wrapper.
 
@@ -119,7 +120,63 @@ If the profile has not been created yet, initialize and remember it:
 python3 tools/pinterest_publish_pin.py --init-chrome-profile
 ```
 
-5. For a preview that fills the Pinterest form but does not publish:
+5. Before using `test` or `final`, confirm the account session with:
+
+```bash
+python3 tools/pinterest_publish_pin.py --mode check-login
+```
+
+If the dedicated Chrome profile is already open, do not launch the same profile again. First verify that the open Chrome was started with local CDP on `127.0.0.1:9222`, then run check-login through the existing browser session:
+
+```bash
+python3 tools/pinterest_publish_pin.py \
+  --mode check-login \
+  --no-default-chrome-profile
+```
+
+Use the same CDP strategy for later Feishu publish work by passing `--use-chrome-cdp` to `tools/feishu_pinterest_worker.py onboard` and `publish`. If CDP is not reachable, ask the user to either close the dedicated Chrome window before running profile mode, or reopen it with `--remote-debugging-port=9222`.
+
+6. If `check-login` returns `ok: true` and the user is setting up the Feishu/Hermes workflow, do not ask for single-Pin image/title/board fields. Move to Feishu onboarding:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target publish
+```
+
+If the Pinterest dedicated Chrome is already open and CDP was confirmed on `127.0.0.1:9222`, include the CDP flag in both onboarding and final publishing:
+
+```bash
+python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --target publish \
+  --use-chrome-cdp
+
+python3 tools/feishu_pinterest_worker.py publish \
+  --config .gstack/feishu-worker-config.json \
+  --use-chrome-cdp
+```
+
+If onboarding reports `feishu_cli`, guide the user to install `lark-cli`, ensure it is on `PATH`, and authenticate with the required scopes:
+
+```bash
+lark-cli auth login --scope "base:app:read base:table:read base:field:read base:record:read base:record:create base:record:update docs:document.media:upload drive:file:download wiki:node:read"
+```
+
+The local Feishu config should stay in an ignored file such as `.gstack/feishu-worker-config.json` and use the official CLI shape:
+
+```json
+{
+  "feishu_cli": "lark-cli",
+  "feishu_cli_flavor": "lark",
+  "prepare_lock_mode": "hermes_singleton",
+  "publish_lock_mode": "hermes_singleton"
+}
+```
+
+Only continue to `test` or `final` with direct Pin fields when the user explicitly asks for one-off Pin validation, dry-run filling, or final publishing.
+
+7. For a preview that fills one explicit Pinterest form but does not publish:
 
 ```bash
 python3 tools/pinterest_publish_pin.py \
@@ -127,7 +184,7 @@ python3 tools/pinterest_publish_pin.py \
   --mode test
 ```
 
-6. For a real publish only after explicit user intent:
+8. For a real one-off publish only after explicit user intent:
 
 ```bash
 python3 tools/pinterest_publish_pin.py \
@@ -155,6 +212,9 @@ For `final` mode, report the `pinUrl` if present. If `ok` is true but `pinUrl` i
 - `board is required`: ask for the exact Pinterest board name.
 - `playwright dependency is not installed`: run `npm install` in the repo.
 - `chromeProfile is required`: run `--print-chrome-profile` or `--init-chrome-profile`; this should only happen when defaults were explicitly disabled.
+- `SingletonLock` or `ProcessSingleton`: the dedicated Chrome profile is already open. Do not start a second profile session. Use CDP mode with `--no-default-chrome-profile` if `127.0.0.1:9222` is reachable, otherwise close or relaunch the dedicated Chrome window with CDP enabled.
+- `chromeCdp.reachable` is false: CDP mode cannot attach to the open browser yet; check that Chrome was launched with `--remote-debugging-port=9222`.
+- `Pinterest login required at https://www.pinterest.com/`: the dedicated profile is not logged in. Let the user sign in directly inside the dedicated Chrome window, then re-run `check-login`.
 - `未能确认 Board 已选中`: the board name did not match Pinterest's UI; ask for the exact visible board name, or use a `Full Board Name|Short Alias` value.
 - Upload or Publish button failures usually mean Pinterest changed its UI or the account session needs manual attention.
 
@@ -162,6 +222,8 @@ For `final` mode, report the `pinUrl` if present. If `ok` is true but `pinUrl` i
 
 Keep the response short:
 
+- For `check-login` success: say Pinterest is logged in, name whether profile or CDP was used, and guide the user to Feishu/Hermes onboarding with `tools/feishu_pinterest_worker.py onboard`. Do not ask for image path, Pin title, Board, link, description, or alt text unless the user explicitly requested one-off Pin test/final mode.
+- For Feishu onboarding: summarize `nextActions`; when `feishu_cli` or `feishu_auth` is pending, provide the `lark-cli` install/auth direction, required scopes, and local config path.
 - For validation: say whether the request is ready, plus blockers.
 - For test mode: say the form was filled but not published.
 - For final mode: say it was published and include the Pinterest URL when available.

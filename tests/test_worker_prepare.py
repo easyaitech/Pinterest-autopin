@@ -52,10 +52,17 @@ class FakeStore:
 
 
 class NoopPublisher:
-    def check_login(self, *, chrome_profile: str = "") -> PublisherResult:
+    def check_login(self, *, chrome_profile: str = "", use_chrome_cdp: bool = False) -> PublisherResult:
         return PublisherResult(True, "check-login")
 
-    def publish(self, request, *, input_path: Path, chrome_profile: str = "") -> PublisherResult:
+    def publish(
+        self,
+        request,
+        *,
+        input_path: Path,
+        chrome_profile: str = "",
+        use_chrome_cdp: bool = False,
+    ) -> PublisherResult:
         return PublisherResult(True, "final")
 
 

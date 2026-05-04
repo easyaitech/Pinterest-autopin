@@ -156,6 +156,7 @@ class OnboardingTest(unittest.TestCase):
                     local_dev=True,
                     prepare_singleton_confirmed=True,
                     publish_singleton_confirmed=True,
+                    use_chrome_cdp=True,
                     which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
                     command_runner=runner,
                     cdp_reachable=lambda: True,
@@ -166,6 +167,123 @@ class OnboardingTest(unittest.TestCase):
         self.assertTrue(payload["readyForPrepare"])
         self.assertTrue(payload["readyForPublish"])
         self.assertEqual([], payload["nextActions"])
+        self.assertIn("--no-default-chrome-profile", login_commands[0])
+        self.assertNotIn("--chrome-profile", login_commands[0])
+        login_step = next(step for step in payload["steps"] if step["id"] == "pinterest_login")
+        self.assertEqual(["--use-chrome-cdp"], login_step["details"]["publishArgs"])
+
+    def test_onboarding_uses_profile_login_when_cdp_is_reachable_but_not_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(json.dumps(config_payload()), encoding="utf-8")
+            profile = Path(temp_dir) / "profile"
+            profile.mkdir()
+            login_commands = []
+
+            def runner(command, **_kwargs):
+                joined = " ".join(str(item) for item in command)
+                if "auth check" in joined:
+                    return completed({"ok": True, "missing": None})
+                if "--print-chrome-profile" in command:
+                    return completed({"ok": True, "chromeProfile": str(profile), "chromeProfileSource": "test"})
+                if "--mode" in command and "check-login" in command:
+                    login_commands.append(command)
+                    return completed({"ok": True})
+                return completed({"ok": True})
+
+            with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
+                worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                payload = run_onboarding(
+                    config_path=config_path,
+                    local_dev=True,
+                    prepare_singleton_confirmed=True,
+                    publish_singleton_confirmed=True,
+                    which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
+                    command_runner=runner,
+                    cdp_reachable=lambda: True,
+                    update_checker=no_update,
+                )
+
+        self.assertTrue(payload["readyForPublish"])
+        self.assertEqual(
+            str(profile),
+            login_commands[0][login_commands[0].index("--chrome-profile") + 1],
+        )
+        self.assertNotIn("--no-default-chrome-profile", login_commands[0])
+        login_step = next(step for step in payload["steps"] if step["id"] == "pinterest_login")
+        self.assertEqual([], login_step["details"]["publishArgs"])
+
+    def test_onboarding_blocks_requested_cdp_when_port_is_not_reachable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(json.dumps(config_payload()), encoding="utf-8")
+            profile = Path(temp_dir) / "profile"
+            profile.mkdir()
+            login_commands = []
+
+            def runner(command, **_kwargs):
+                joined = " ".join(str(item) for item in command)
+                if "auth check" in joined:
+                    return completed({"ok": True, "missing": None})
+                if "--print-chrome-profile" in command:
+                    return completed({"ok": True, "chromeProfile": str(profile), "chromeProfileSource": "test"})
+                if "--mode" in command and "check-login" in command:
+                    login_commands.append(command)
+                    return completed({"ok": True})
+                return completed({"ok": True})
+
+            with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
+                worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                payload = run_onboarding(
+                    config_path=config_path,
+                    local_dev=True,
+                    prepare_singleton_confirmed=True,
+                    publish_singleton_confirmed=True,
+                    use_chrome_cdp=True,
+                    which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
+                    command_runner=runner,
+                    cdp_reachable=lambda: False,
+                    update_checker=no_update,
+                )
+
+        self.assertFalse(payload["readyForPublish"])
+        self.assertEqual([], login_commands)
+        login_step = next(step for step in payload["steps"] if step["id"] == "pinterest_login")
+        self.assertIn("Chrome CDP is not reachable", login_step["details"]["reason"])
+
+    def test_onboarding_uses_profile_login_when_cdp_is_not_reachable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(json.dumps(config_payload()), encoding="utf-8")
+            profile = Path(temp_dir) / "profile"
+            profile.mkdir()
+            login_commands = []
+
+            def runner(command, **_kwargs):
+                joined = " ".join(str(item) for item in command)
+                if "auth check" in joined:
+                    return completed({"ok": True, "missing": None})
+                if "--print-chrome-profile" in command:
+                    return completed({"ok": True, "chromeProfile": str(profile), "chromeProfileSource": "test"})
+                if "--mode" in command and "check-login" in command:
+                    login_commands.append(command)
+                    return completed({"ok": True})
+                return completed({"ok": True})
+
+            with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
+                worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                payload = run_onboarding(
+                    config_path=config_path,
+                    local_dev=True,
+                    prepare_singleton_confirmed=True,
+                    publish_singleton_confirmed=True,
+                    which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
+                    command_runner=runner,
+                    cdp_reachable=lambda: False,
+                    update_checker=no_update,
+                )
+
+        self.assertTrue(payload["readyForPublish"])
         self.assertEqual(
             str(profile),
             login_commands[0][login_commands[0].index("--chrome-profile") + 1],
