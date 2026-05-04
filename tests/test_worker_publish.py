@@ -94,13 +94,14 @@ class FakePublisher:
         return PublisherResult(False, "final", errors=("publish failed",))
 
 
-def config() -> WorkerConfig:
+def config(**kwargs) -> WorkerConfig:
     return WorkerConfig(
         app_token="app",
         pins=TableConfig("pins", fields={}),
         brands=TableConfig("brands", fields={}),
         runs=TableConfig("runs", fields={}),
         runtime_locks=TableConfig("locks", fields={}),
+        **kwargs,
     )
 
 
@@ -191,6 +192,23 @@ class WorkerPublishTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertTrue(publisher.published)
         self.assertEqual("已发布", pins[1]["fields"]["status"])
+
+    def test_publish_with_hermes_singleton_skips_feishu_runtime_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = FakeStore(lock_owner="other")
+            publisher = FakePublisher()
+            worker = FeishuPinterestWorker(
+                config(publish_lock_mode="hermes_singleton"),
+                runtime(temp_dir),
+                store,
+                publisher,
+            )
+
+            result = worker.publish()
+
+        self.assertTrue(result.ok)
+        self.assertTrue(publisher.published)
+        self.assertEqual("已发布", store.pin["fields"]["status"])
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from .hermes_runtime import RuntimeContext, RuntimeErrorConfig, build_runtime_co
 from .image_prepare import prepare_image
 from .publisher import PinterestPublisher, PublisherResult
 from .runtime_lock import RuntimeLock
-from .worker_config import WorkerConfig, validate_worker_config
+from .worker_config import LOCK_MODE_HERMES_SINGLETON, WorkerConfig, validate_worker_config
 from .worker_state import build_claim, eligible_for_publish, iso, owns_publish_claim, utcnow
 
 
@@ -123,19 +123,28 @@ class FeishuPinterestWorker:
         if not self.runtime.hermes_run_id:
             raise RuntimeErrorConfig("Hermes run identity is required before publish")
 
-        lock = RuntimeLock(
-            self.store,
-            self.config.runtime_locks.table_id,
-            lock_name=self.config.publish_lock_name,
-            lease_minutes=self.config.claim_minutes,
-            fields=dict(self.config.runtime_locks.fields),
-        )
-        lock_result = lock.acquire(
-            owner_run_id=self.runtime.run_id,
-            owner_hermes_run_id=self.runtime.hermes_run_id,
-        )
-        if not lock_result.acquired:
-            return WorkerResult(True, "publish", skipped=1, errors=(lock_result.reason,))
+        if self.config.publish_lock_mode != LOCK_MODE_HERMES_SINGLETON and not self._atomic_compare_available():
+            return WorkerResult(
+                False,
+                "publish",
+                errors=("publish requires atomic compare-update or publish_lock_mode=hermes_singleton",),
+            )
+
+        lock: RuntimeLock | None = None
+        if self.config.publish_lock_mode != LOCK_MODE_HERMES_SINGLETON:
+            lock = RuntimeLock(
+                self.store,
+                self.config.runtime_locks.table_id,
+                lock_name=self.config.publish_lock_name,
+                lease_minutes=self.config.claim_minutes,
+                fields=dict(self.config.runtime_locks.fields),
+            )
+            lock_result = lock.acquire(
+                owner_run_id=self.runtime.run_id,
+                owner_hermes_run_id=self.runtime.hermes_run_id,
+            )
+            if not lock_result.acquired:
+                return WorkerResult(True, "publish", skipped=1, errors=(lock_result.reason,))
 
         processed = 0
         errors: list[str] = []
@@ -205,11 +214,18 @@ class FeishuPinterestWorker:
                     errors.append(error_text)
             return WorkerResult(not errors, "publish", processed=processed, errors=tuple(errors))
         finally:
-            lock.release(owner_run_id=self.runtime.run_id)
+            if lock:
+                lock.release(owner_run_id=self.runtime.run_id)
 
     def prepare(self, *, limit: int | None = None) -> WorkerResult:
         if not self.runtime.hermes_run_id:
             raise RuntimeErrorConfig("Hermes run identity is required before prepare")
+        if self.config.prepare_lock_mode != LOCK_MODE_HERMES_SINGLETON and not self._atomic_compare_available():
+            return WorkerResult(
+                False,
+                "prepare",
+                errors=("prepare requires atomic compare-update or prepare_lock_mode=hermes_singleton",),
+            )
 
         target = limit or self.config.prepare_limit
         processed = 0
@@ -224,7 +240,9 @@ class FeishuPinterestWorker:
                 skipped += 1
                 continue
             record_id = _record_id(record)
-            self._update_pin(record_id, _prepare_claim(self.config.status_values["preparing"], self.runtime.run_id, self.config.claim_minutes))
+            if not self._claim_prepare(record_id, fields):
+                skipped += 1
+                continue
             refetched = self._refetch(record_id)
             refetched_fields = self._pin_fields(refetched)
             if not _owns_prepare_claim(refetched_fields, self.config.status_values, self.runtime.run_id):
@@ -256,6 +274,35 @@ class FeishuPinterestWorker:
                 self._create_run("prepare", pin=record_id, ok=False, error=error_text)
                 errors.append(error_text)
         return WorkerResult(not errors, "prepare", processed=processed, skipped=skipped, errors=tuple(errors))
+
+    def _atomic_compare_available(self) -> bool:
+        if isinstance(self.store, FeishuCli):
+            return self.store.resolved_flavor != "lark"
+        return callable(getattr(self.store, "compare_update_record", None))
+
+    def _claim_prepare(self, record_id: str, fields: Mapping[str, Any]) -> bool:
+        claim = _prepare_claim(
+            self.config.status_values["preparing"],
+            self.runtime.run_id,
+            self.config.claim_minutes,
+        )
+        if self.config.prepare_lock_mode == LOCK_MODE_HERMES_SINGLETON:
+            self._update_pin(record_id, claim)
+            return True
+
+        compare_update = getattr(self.store, "compare_update_record", None)
+        if not callable(compare_update):
+            return False
+        result = compare_update(
+            self.config.pins.table_id,
+            record_id,
+            expected_fields=_mapped_fields(
+                dict(self.config.pins.fields),
+                {"status": str(fields.get("status", ""))},
+            ),
+            fields=_mapped_fields(dict(self.config.pins.fields), claim),
+        )
+        return not _compare_missed(result)
 
     def _list_publish_candidates(self, target: int) -> list[dict[str, Any]]:
         return self.store.list_records(
@@ -465,6 +512,16 @@ def _next_int(value: Any) -> int:
         return int(value or 0) + 1
     except (TypeError, ValueError):
         return 1
+
+
+def _compare_missed(payload: Mapping[str, Any]) -> bool:
+    data = payload.get("data")
+    compare_payload = data if isinstance(data, Mapping) else payload
+    if compare_payload.get("updated") is False or compare_payload.get("matched") is False:
+        return True
+    if compare_payload.get("ok") is False:
+        return True
+    return False
 
 
 def _attachment_ref(value: Any) -> AttachmentRef | None:

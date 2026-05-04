@@ -66,10 +66,14 @@ class WorkerConfigTest(unittest.TestCase):
         payload = config_payload()
         payload["feishu_cli"] = "lark-cli"
         payload["feishu_cli_flavor"] = "lark"
+        payload["prepare_lock_mode"] = "hermes_singleton"
+        payload["publish_lock_mode"] = "hermes_singleton"
         config = worker_config_from_dict(payload)
 
         self.assertEqual("lark-cli", config.feishu_cli)
         self.assertEqual("lark", config.feishu_cli_flavor)
+        self.assertEqual("hermes_singleton", config.prepare_lock_mode)
+        self.assertEqual("hermes_singleton", config.publish_lock_mode)
 
     def test_missing_table_fails(self) -> None:
         payload = config_payload()
@@ -106,6 +110,13 @@ class WorkerConfigTest(unittest.TestCase):
             "pins.fields.status must be replaced in a local ignored config file",
             errors,
         )
+
+    def test_invalid_lock_mode_is_reported(self) -> None:
+        payload = config_payload()
+        payload["prepare_lock_mode"] = "local_guess"
+        config = worker_config_from_dict(payload)
+
+        self.assertIn("prepare_lock_mode must be feishu_atomic or hermes_singleton", validate_worker_config(config))
 
 
 if __name__ == "__main__":

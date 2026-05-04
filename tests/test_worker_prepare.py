@@ -29,6 +29,16 @@ class FakeStore:
         record["fields"].update(fields)
         return record
 
+    def compare_update_record(self, table_id: str, record_id: str, *, expected_fields: dict, fields: dict) -> dict:
+        record = next(item for item in self.records if item["record_id"] == record_id)
+        current = record["fields"]
+        for key, value in expected_fields.items():
+            if current.get(key, "") != value:
+                return {"updated": False}
+        self.updates.append((table_id, record_id, fields))
+        current.update(fields)
+        return {"updated": True}
+
     def create_record(self, table_id: str, fields: dict) -> dict:
         return {}
 
@@ -91,6 +101,35 @@ class WorkerPrepareTest(unittest.TestCase):
         self.assertEqual("Handmade Mug", record["fields"]["draft_title"])
         self.assertEqual("processed-token", record["fields"]["processed_image"][0]["file_token"])
         self.assertTrue(store.uploaded)
+
+    def test_prepare_atomic_claim_miss_skips_record(self) -> None:
+        record = {
+            "record_id": "pin-1",
+            "fields": {
+                "status": "待 AI 生成",
+                "source_image": [{"file_token": "source-token", "name": "source.jpg"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = FakeStore([record])
+
+            def racing_compare(table_id: str, record_id: str, *, expected_fields: dict, fields: dict) -> dict:
+                record["fields"]["status"] = "AI 生成中"
+                return {"updated": False}
+
+            store.compare_update_record = racing_compare  # type: ignore[method-assign]
+            worker = FeishuPinterestWorker(
+                WorkerConfig("app", TableConfig("pins"), TableConfig("brands"), TableConfig("runs"), TableConfig("locks")),
+                RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
+                store,
+                NoopPublisher(),
+            )
+
+            result = worker.prepare(limit=1)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(0, result.processed)
+        self.assertEqual(1, result.skipped)
 
 
 if __name__ == "__main__":

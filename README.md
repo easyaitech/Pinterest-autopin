@@ -294,10 +294,28 @@ For local setup checks:
 python3 tools/feishu_pinterest_worker.py onboard --config .gstack/feishu-worker-config.json --local-dev
 ```
 
-If official `lark-cli` is used for Feishu, final publish needs Hermes to enforce one publish run at a time because `lark-cli` does not expose an atomic compare-update operation. After configuring the Hermes publish job with max concurrency 1, run onboarding with:
+If official `lark-cli` is used for Feishu, prepare and final publish need Hermes to enforce one run at a time because `lark-cli` does not expose an atomic compare-update operation. After configuring the Hermes jobs with max concurrency 1, either set the local config modes:
+
+```json
+{
+  "prepare_lock_mode": "hermes_singleton",
+  "publish_lock_mode": "hermes_singleton"
+}
+```
+
+or pass the singleton confirmation flags on both onboarding and the real worker commands:
 
 ```bash
 python3 tools/feishu_pinterest_worker.py onboard \
+  --config .gstack/feishu-worker-config.json \
+  --prepare-singleton-confirmed \
+  --publish-singleton-confirmed
+
+python3 tools/feishu_pinterest_worker.py prepare \
+  --config .gstack/feishu-worker-config.json \
+  --prepare-singleton-confirmed
+
+python3 tools/feishu_pinterest_worker.py publish \
   --config .gstack/feishu-worker-config.json \
   --publish-singleton-confirmed
 ```
@@ -325,7 +343,9 @@ Official `lark-cli` is supported with:
 ```json
 {
   "feishu_cli": "lark-cli",
-  "feishu_cli_flavor": "lark"
+  "feishu_cli_flavor": "lark",
+  "prepare_lock_mode": "hermes_singleton",
+  "publish_lock_mode": "hermes_singleton"
 }
 ```
 
@@ -342,7 +362,8 @@ Official `lark-cli` uses:
 - `base +record-upload-attachment`
 - `api GET /open-apis/drive/v1/medias/{file_token}/download`
 
-`publish` still requires an atomic runtime lock; if the CLI does not expose atomic compare-update, the worker refuses to acquire the shared Pinterest profile lock instead of using a non-atomic fallback.
+`prepare` and `publish` require either an atomic Feishu compare-update lock or explicit `hermes_singleton` lock modes. If the CLI does not expose atomic compare-update and singleton mode is not configured, the worker refuses to mutate rows instead of using a non-atomic fallback.
+For official `lark-cli`, use `hermes_singleton` only after the Hermes schedules are configured with max concurrency 1.
 
 `prepare` claims ready rows, downloads `source_image`, writes draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
 

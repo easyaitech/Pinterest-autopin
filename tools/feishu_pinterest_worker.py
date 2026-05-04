@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 
+from dataclasses import replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -16,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from pinterest_autopin.hermes_runtime import RuntimeErrorConfig
 from pinterest_autopin.onboarding import DEFAULT_CONFIG, run_onboarding
 from pinterest_autopin.worker import FeishuPinterestWorker, WorkerResult
-from pinterest_autopin.worker_config import ConfigError, load_worker_config
+from pinterest_autopin.worker_config import LOCK_MODE_HERMES_SINGLETON, ConfigError, load_worker_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         "--publish-singleton-confirmed",
         action="store_true",
         help="Assert Hermes publish runs are configured with max concurrency 1.",
+    )
+    parser.add_argument(
+        "--prepare-singleton-confirmed",
+        action="store_true",
+        help="Assert Hermes prepare runs are configured with max concurrency 1.",
     )
     parser.add_argument(
         "--target",
@@ -73,6 +79,7 @@ def main() -> int:
             local_dev=args.local_dev,
             chrome_profile=args.chrome_profile,
             check_pinterest_login=not args.skip_pinterest_login_check,
+            prepare_singleton_confirmed=args.prepare_singleton_confirmed,
             publish_singleton_confirmed=args.publish_singleton_confirmed,
             target=args.target,
         )
@@ -80,6 +87,11 @@ def main() -> int:
 
     try:
         config = load_worker_config(Path(args.config))
+        config = apply_lock_overrides(
+            config,
+            prepare_singleton_confirmed=args.prepare_singleton_confirmed,
+            publish_singleton_confirmed=args.publish_singleton_confirmed,
+        )
         worker = FeishuPinterestWorker.from_config(
             config,
             local_dev=args.local_dev,
@@ -95,6 +107,20 @@ def main() -> int:
         return print_json({"ok": False, "action": args.command, "errors": [str(exc)]}, 1)
 
     return print_json(result_payload(result), 0 if result.ok else 1)
+
+
+def apply_lock_overrides(
+    config,
+    *,
+    prepare_singleton_confirmed: bool,
+    publish_singleton_confirmed: bool,
+):
+    updates = {}
+    if prepare_singleton_confirmed:
+        updates["prepare_lock_mode"] = LOCK_MODE_HERMES_SINGLETON
+    if publish_singleton_confirmed:
+        updates["publish_lock_mode"] = LOCK_MODE_HERMES_SINGLETON
+    return replace(config, **updates) if updates else config
 
 
 if __name__ == "__main__":

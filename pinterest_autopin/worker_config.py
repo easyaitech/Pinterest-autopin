@@ -23,6 +23,10 @@ DEFAULT_STATUS_VALUES = {
     "publish_failed": "发布失败",
 }
 
+LOCK_MODE_FEISHU_ATOMIC = "feishu_atomic"
+LOCK_MODE_HERMES_SINGLETON = "hermes_singleton"
+LOCK_MODES = {LOCK_MODE_FEISHU_ATOMIC, LOCK_MODE_HERMES_SINGLETON}
+
 
 class ConfigError(ValueError):
     """Raised when worker config is unsafe or incomplete."""
@@ -50,6 +54,8 @@ class WorkerConfig:
     required_hermes_secrets: tuple[str, ...] = ()
     worker_version: str = "dev"
     publish_lock_name: str = "pinterest_profile_publish"
+    prepare_lock_mode: str = LOCK_MODE_FEISHU_ATOMIC
+    publish_lock_mode: str = LOCK_MODE_FEISHU_ATOMIC
     claim_minutes: int = 30
     publish_limit: int = 1
     prepare_limit: int = 10
@@ -104,6 +110,8 @@ def worker_config_from_dict(payload: Mapping[str, Any]) -> WorkerConfig:
         required_hermes_secrets=tuple(str(name) for name in required),
         worker_version=str(payload.get("worker_version", "dev")),
         publish_lock_name=str(payload.get("publish_lock_name", "pinterest_profile_publish")),
+        prepare_lock_mode=str(payload.get("prepare_lock_mode", LOCK_MODE_FEISHU_ATOMIC)),
+        publish_lock_mode=str(payload.get("publish_lock_mode", LOCK_MODE_FEISHU_ATOMIC)),
         claim_minutes=int(payload.get("claim_minutes", 30)),
         publish_limit=int(payload.get("publish_limit", 1)),
         prepare_limit=int(payload.get("prepare_limit", 10)),
@@ -164,4 +172,8 @@ def validate_worker_config(config: WorkerConfig) -> list[str]:
     for status_key in DEFAULT_STATUS_VALUES:
         if not config.status_values.get(status_key):
             errors.append(f"status_values.{status_key} is required")
+    if config.prepare_lock_mode not in LOCK_MODES:
+        errors.append("prepare_lock_mode must be feishu_atomic or hermes_singleton")
+    if config.publish_lock_mode not in LOCK_MODES:
+        errors.append("publish_lock_mode must be feishu_atomic or hermes_singleton")
     return errors

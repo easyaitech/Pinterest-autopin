@@ -13,7 +13,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from .worker import FeishuPinterestWorker
-from .worker_config import ConfigError, WorkerConfig, load_worker_config, validate_worker_config
+from .worker_config import (
+    LOCK_MODE_FEISHU_ATOMIC,
+    LOCK_MODE_HERMES_SINGLETON,
+    ConfigError,
+    WorkerConfig,
+    load_worker_config,
+    validate_worker_config,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +49,7 @@ def run_onboarding(
     local_dev: bool = False,
     chrome_profile: str = "",
     check_pinterest_login: bool = True,
+    prepare_singleton_confirmed: bool = False,
     publish_singleton_confirmed: bool = False,
     target: str = "publish",
     env: Mapping[str, str] | None = None,
@@ -52,7 +60,6 @@ def run_onboarding(
     runtime_env = dict(env or os.environ)
     run = command_runner or subprocess.run
     which_bin = which or shutil.which
-    check_cdp = cdp_reachable or _chrome_cdp_reachable
 
     steps: list[dict[str, Any]] = []
     resolved_config = Path(config_path) if config_path else DEFAULT_CONFIG
@@ -180,26 +187,27 @@ def run_onboarding(
 
     profile = _print_chrome_profile(run, chrome_profile)
     profile_path = profile.get("chromeProfile", "")
+    profile_exists = bool(profile_path) and Path(profile_path).exists()
     profile_ok = bool(profile.get("ok")) and bool(profile_path)
     steps.append(
         _step(
             "pinterest_profile",
             "Initialize dedicated Pinterest Chrome profile",
-            "complete" if profile_ok and Path(profile_path).exists() else "action_required",
+            "complete" if profile_ok and profile_exists else "action_required",
             (
                 "Dedicated Pinterest Chrome profile exists."
-                if profile_ok and Path(profile_path).exists()
+                if profile_ok and profile_exists
                 else "Initialize the dedicated Chrome profile before login."
             ),
             user_action="Let the agent initialize the profile, then sign in to Pinterest in that Chrome window.",
             agent_action="python3 tools/pinterest_publish_pin.py --init-chrome-profile",
             blocking=True,
-            details={"profileSource": profile.get("chromeProfileSource", ""), "profileReady": bool(Path(profile_path).exists())},
+            details={"profileSource": profile.get("chromeProfileSource", ""), "profileReady": profile_exists},
         )
     )
 
     pinterest_login = (
-        _check_pinterest_login(run, check_cdp)
+        _check_pinterest_login(run, profile_path if profile_exists else "")
         if check_pinterest_login
         else {"ok": False, "skipped": True, "reason": "Skipped by --skip-pinterest-login-check"}
     )
@@ -214,16 +222,37 @@ def run_onboarding(
                 else "Sign in to Pinterest in the dedicated Chrome profile, then rerun onboarding."
             ),
             user_action="Open the dedicated Chrome profile, sign in to Pinterest, and keep that profile available to Hermes.",
-            agent_action="python3 tools/pinterest_publish_pin.py --mode check-login --no-default-chrome-profile",
+            agent_action=_pinterest_login_agent_action(profile_path),
             blocking=True,
             details={
                 "checked": not pinterest_login.get("skipped", False),
+                "chromeProfile": profile_path,
                 "reason": pinterest_login.get("reason", ""),
             },
         )
     )
 
-    publish_lock_ready = publish_singleton_confirmed or _config_flavor(config) == "bitable"
+    prepare_lock_ready = _lock_ready(config, "prepare", prepare_singleton_confirmed)
+    steps.append(
+        _step(
+            "prepare_singleton",
+            "Protect Feishu prepare claims",
+            "complete" if prepare_lock_ready else "action_required",
+            _lock_summary(config, "prepare", prepare_singleton_confirmed, prepare_lock_ready),
+            user_action=(
+                "Configure the Hermes prepare schedule with max concurrency 1, then pass "
+                "--prepare-singleton-confirmed to onboard and prepare, or use an atomic compare-update wrapper."
+            ),
+            agent_action=(
+                "Add prepare_lock_mode=hermes_singleton in the local config, or pass "
+                "--prepare-singleton-confirmed on the Hermes prepare command."
+            ),
+            blocking=True,
+            details={"lockMode": _effective_lock_mode(config, "prepare", prepare_singleton_confirmed)},
+        )
+    )
+
+    publish_lock_ready = _lock_ready(config, "publish", publish_singleton_confirmed)
     steps.append(
         _step(
             "publish_singleton",
@@ -234,12 +263,23 @@ def run_onboarding(
                 if publish_lock_ready
                 else "Official lark-cli cannot do atomic compare-update; configure Hermes to run publish as a singleton or use an atomic lock wrapper."
             ),
-            user_action="Configure the Hermes publish schedule with max concurrency 1, then pass --publish-singleton-confirmed.",
+            user_action=(
+                "Configure the Hermes publish schedule with max concurrency 1, then pass "
+                "--publish-singleton-confirmed to onboard and publish."
+            ),
+            agent_action=(
+                "Add publish_lock_mode=hermes_singleton in the local config, or pass "
+                "--publish-singleton-confirmed on the Hermes publish command."
+            ),
             blocking=True,
+            details={"lockMode": _effective_lock_mode(config, "publish", publish_singleton_confirmed)},
         )
     )
 
-    ready_for_prepare = _all_complete(steps, ("install_dependencies", "hermes_identity", "feishu_config", "feishu_cli", "feishu_auth", "feishu_doctor"))
+    prepare_required = ["install_dependencies", "hermes_identity", "feishu_config", "feishu_cli", "feishu_doctor", "prepare_singleton"]
+    if _config_flavor(config) == "lark":
+        prepare_required.append("feishu_auth")
+    ready_for_prepare = _all_complete(steps, prepare_required)
     ready_for_publish = ready_for_prepare and _all_complete(steps, ("pinterest_profile", "pinterest_login", "publish_singleton"))
 
     target_ok = ready_for_prepare if target == "prepare" else ready_for_publish
@@ -296,6 +336,32 @@ def _config_flavor(config: WorkerConfig | None) -> str:
     return config.feishu_cli_flavor if config else "lark"
 
 
+def _effective_lock_mode(config: WorkerConfig | None, action: str, singleton_confirmed: bool) -> str:
+    if singleton_confirmed:
+        return LOCK_MODE_HERMES_SINGLETON
+    if not config:
+        return LOCK_MODE_FEISHU_ATOMIC
+    if action == "prepare":
+        return config.prepare_lock_mode
+    return config.publish_lock_mode
+
+
+def _lock_ready(config: WorkerConfig | None, action: str, singleton_confirmed: bool) -> bool:
+    mode = _effective_lock_mode(config, action, singleton_confirmed)
+    if mode == LOCK_MODE_HERMES_SINGLETON:
+        return True
+    return bool(config) and _config_flavor(config) != "lark"
+
+
+def _lock_summary(config: WorkerConfig | None, action: str, singleton_confirmed: bool, ready: bool) -> str:
+    mode = _effective_lock_mode(config, action, singleton_confirmed)
+    if ready and mode == LOCK_MODE_HERMES_SINGLETON:
+        return f"Hermes {action} singleton is confirmed."
+    if ready:
+        return f"Feishu atomic compare-update protects {action} claims."
+    return f"Official lark-cli cannot atomically claim {action} rows; configure Hermes singleton or an atomic wrapper."
+
+
 def _first_env(env: Mapping[str, str], keys: Sequence[str]) -> str:
     for key in keys:
         value = env.get(key, "").strip()
@@ -331,16 +397,23 @@ def _print_chrome_profile(run: CommandRunner, chrome_profile: str) -> dict[str, 
     return payload if isinstance(payload, dict) else {"ok": False}
 
 
-def _check_pinterest_login(run: CommandRunner, cdp_reachable: Callable[[], bool]) -> dict[str, Any]:
-    if not cdp_reachable():
-        return {"ok": False, "skipped": True, "reason": "Chrome CDP is not reachable"}
+def _pinterest_login_agent_action(profile_path: str) -> str:
+    if profile_path:
+        return f"python3 tools/pinterest_publish_pin.py --mode check-login --chrome-profile {profile_path}"
+    return "python3 tools/pinterest_publish_pin.py --mode check-login"
+
+
+def _check_pinterest_login(run: CommandRunner, chrome_profile: str) -> dict[str, Any]:
+    if not chrome_profile:
+        return {"ok": False, "skipped": True, "reason": "Dedicated Chrome profile is not ready"}
     completed = run(
         [
             sys.executable,
             str(PINTEREST_CLI),
             "--mode",
             "check-login",
-            "--no-default-chrome-profile",
+            "--chrome-profile",
+            chrome_profile,
             "--timeout",
             "60",
         ],

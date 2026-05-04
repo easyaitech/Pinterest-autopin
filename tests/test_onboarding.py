@@ -74,7 +74,9 @@ class OnboardingTest(unittest.TestCase):
                 local_dev=True,
                 check_pinterest_login=False,
                 which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
-                command_runner=lambda *args, **kwargs: completed({"ok": True, "chromeProfile": str(Path(temp_dir) / "profile")}),
+                command_runner=lambda *args, **kwargs: completed(
+                    {"ok": True, "chromeProfile": str(Path(temp_dir) / "profile")}
+                ),
                 cdp_reachable=lambda: False,
             )
 
@@ -103,6 +105,7 @@ class OnboardingTest(unittest.TestCase):
                     config_path=config_path,
                     local_dev=True,
                     check_pinterest_login=False,
+                    prepare_singleton_confirmed=True,
                     target="prepare",
                     which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
                     command_runner=runner,
@@ -121,6 +124,7 @@ class OnboardingTest(unittest.TestCase):
             config_path.write_text(json.dumps(config_payload()), encoding="utf-8")
             profile = Path(temp_dir) / "profile"
             profile.mkdir()
+            login_commands = []
 
             def runner(command, **_kwargs):
                 joined = " ".join(str(item) for item in command)
@@ -129,6 +133,7 @@ class OnboardingTest(unittest.TestCase):
                 if "--print-chrome-profile" in command:
                     return completed({"ok": True, "chromeProfile": str(profile), "chromeProfileSource": "test"})
                 if "--mode" in command and "check-login" in command:
+                    login_commands.append(command)
                     return completed({"ok": True})
                 return completed({"ok": True})
 
@@ -137,6 +142,7 @@ class OnboardingTest(unittest.TestCase):
                 payload = run_onboarding(
                     config_path=config_path,
                     local_dev=True,
+                    prepare_singleton_confirmed=True,
                     publish_singleton_confirmed=True,
                     which=lambda name: "/usr/bin/" + name if name in {"node", "lark-cli"} else None,
                     command_runner=runner,
@@ -147,6 +153,41 @@ class OnboardingTest(unittest.TestCase):
         self.assertTrue(payload["readyForPrepare"])
         self.assertTrue(payload["readyForPublish"])
         self.assertEqual([], payload["nextActions"])
+        self.assertEqual(
+            str(profile),
+            login_commands[0][login_commands[0].index("--chrome-profile") + 1],
+        )
+        self.assertNotIn("--no-default-chrome-profile", login_commands[0])
+
+    def test_bitable_prepare_does_not_require_lark_auth_step(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            payload = config_payload()
+            payload["feishu_cli"] = "feishu"
+            payload["feishu_cli_flavor"] = "bitable"
+            config_path.write_text(json.dumps(payload), encoding="utf-8")
+            profile = Path(temp_dir) / "profile"
+            profile.mkdir()
+
+            def runner(command, **_kwargs):
+                if "--print-chrome-profile" in command:
+                    return completed({"ok": True, "chromeProfile": str(profile), "chromeProfileSource": "test"})
+                return completed({"ok": True})
+
+            with patch("pinterest_autopin.onboarding.FeishuPinterestWorker") as worker_cls:
+                worker_cls.from_config.return_value.doctor.return_value.errors = ()
+                onboarded = run_onboarding(
+                    config_path=config_path,
+                    local_dev=True,
+                    check_pinterest_login=False,
+                    target="prepare",
+                    which=lambda name: "/usr/bin/" + name if name in {"node", "feishu"} else None,
+                    command_runner=runner,
+                )
+
+        self.assertTrue(onboarded["ok"])
+        self.assertTrue(onboarded["readyForPrepare"])
+        self.assertNotIn("feishu_auth", [item["id"] for item in onboarded["steps"]])
 
 
 if __name__ == "__main__":
