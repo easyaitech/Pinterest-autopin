@@ -57,17 +57,21 @@ By default, the CLI uses this stable dedicated profile:
 ~/.pinterest-autopin/chrome-profile
 ```
 
+The visible Chrome profile name is set to `Pinterest AutoPin` during initialization, so it is easy to distinguish from a personal Chrome profile. The directory stays stable for existing login sessions.
+
 To see the exact path on the current machine:
 
 ```bash
 npm run pin:profile
 ```
 
-To create the profile directory and save it in `~/.pinterest-autopin/config.json`:
+To create the profile directory, apply the `Pinterest AutoPin` display name, and save it in `~/.pinterest-autopin/config.json`:
 
 ```bash
 npm run pin:init-profile
 ```
+
+For an existing dedicated profile, rerun the init command with that Chrome window closed to refresh the display name without changing the profile directory.
 
 For a custom dedicated profile, initialize it once:
 

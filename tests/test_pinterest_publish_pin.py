@@ -259,7 +259,100 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
             self.assertTrue(profile_dir.is_dir())
             config_payload = json.loads(config_path.read_text(encoding="utf-8"))
 
-        self.assertEqual({"chromeProfile": str(profile_dir)}, config_payload)
+        self.assertEqual(
+            {
+                "chromeProfile": str(profile_dir),
+                "chromeProfileName": pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME,
+            },
+            config_payload,
+        )
+
+    def test_init_chrome_profile_names_dedicated_chrome_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_dir = Path(temp_dir) / "profile"
+            config_path = Path(temp_dir) / "config.json"
+
+            with patch.object(pinterest_publish_pin, "CONFIG_PATH", config_path):
+                pinterest_publish_pin.init_chrome_profile(str(profile_dir))
+
+            local_state = json.loads((profile_dir / "Local State").read_text(encoding="utf-8"))
+            preferences = json.loads(
+                (profile_dir / "Default" / "Preferences").read_text(encoding="utf-8")
+            )
+
+        profile_cache = local_state["profile"]["info_cache"]["Default"]
+        self.assertEqual(pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME, profile_cache["name"])
+        self.assertEqual(
+            pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME,
+            profile_cache["shortcut_name"],
+        )
+        self.assertFalse(profile_cache["is_using_default_name"])
+        self.assertEqual("Default", local_state["profile"]["last_used"])
+        self.assertEqual(
+            pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME,
+            preferences["profile"]["name"],
+        )
+        self.assertFalse(preferences["profile"]["using_default_name"])
+
+    def test_profile_display_name_preserves_existing_chrome_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_dir = Path(temp_dir) / "profile"
+            preferences_dir = profile_dir / "Default"
+            preferences_dir.mkdir(parents=True)
+            (profile_dir / "Local State").write_text(
+                json.dumps(
+                    {
+                        "browser": {"enabled_labs_experiments": ["example"]},
+                        "profile": {
+                            "info_cache": {
+                                "Default": {"avatar_icon": "chrome://theme/avatar"}
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (preferences_dir / "Preferences").write_text(
+                json.dumps({"download": {"default_directory": "/tmp/downloads"}}),
+                encoding="utf-8",
+            )
+
+            pinterest_publish_pin.ensure_chrome_profile_display_name(str(profile_dir))
+
+            local_state = json.loads((profile_dir / "Local State").read_text(encoding="utf-8"))
+            preferences = json.loads((preferences_dir / "Preferences").read_text(encoding="utf-8"))
+
+        self.assertEqual(["example"], local_state["browser"]["enabled_labs_experiments"])
+        self.assertEqual(
+            "chrome://theme/avatar",
+            local_state["profile"]["info_cache"]["Default"]["avatar_icon"],
+        )
+        self.assertEqual(
+            pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME,
+            local_state["profile"]["info_cache"]["Default"]["name"],
+        )
+        self.assertEqual("/tmp/downloads", preferences["download"]["default_directory"])
+        self.assertEqual(
+            pinterest_publish_pin.CHROME_PROFILE_DISPLAY_NAME,
+            preferences["profile"]["name"],
+        )
+
+    def test_init_chrome_profile_refuses_open_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_dir = Path(temp_dir) / "profile"
+            profile_dir.mkdir()
+            (profile_dir / "SingletonLock").write_text("", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Chrome profile appears to be open"):
+                pinterest_publish_pin.init_chrome_profile(str(profile_dir))
+
+    def test_open_profile_detection_handles_chrome_singleton_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_dir = Path(temp_dir) / "profile"
+            profile_dir.mkdir()
+            (profile_dir / "SingletonLock").symlink_to("missing-lock-target")
+
+            self.assertTrue(pinterest_publish_pin.chrome_profile_appears_open(str(profile_dir)))
 
     def test_execution_error_uses_nested_result_error(self) -> None:
         # Regression: worker publish should surface the actionable Pinterest login

@@ -28,6 +28,9 @@ PROFILE_ENV_VAR = "PINTEREST_AUTOPIN_CHROME_PROFILE"
 CONFIG_DIR = Path.home() / ".pinterest-autopin"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_CHROME_PROFILE = CONFIG_DIR / "chrome-profile"
+CHROME_PROFILE_DISPLAY_NAME = "Pinterest AutoPin"
+CHROME_PROFILE_INTERNAL_DIR = "Default"
+CHROME_PROFILE_LOCK_FILES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
 
 def parse_args() -> argparse.Namespace:
@@ -139,6 +142,7 @@ def chrome_profile_metadata(source: str) -> dict[str, str]:
         "envVar": PROFILE_ENV_VAR,
         "configPath": str(CONFIG_PATH),
         "defaultPath": str(DEFAULT_CHROME_PROFILE),
+        "displayName": CHROME_PROFILE_DISPLAY_NAME,
     }
 
 
@@ -344,11 +348,81 @@ def save_chrome_profile_config(chrome_profile: str) -> None:
         except (OSError, json.JSONDecodeError):
             config_payload = {}
     config_payload["chromeProfile"] = chrome_profile
-    CONFIG_PATH.write_text(json.dumps(config_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    config_payload["chromeProfileName"] = CHROME_PROFILE_DISPLAY_NAME
+    CONFIG_PATH.write_text(
+        json.dumps(config_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def read_chrome_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"failed to read Chrome profile metadata {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Chrome profile metadata must be a JSON object: {path}")
+    return payload
+
+
+def write_chrome_json_object(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
+    temp_path.replace(path)
+
+
+def ensure_nested_object(payload: dict[str, Any], key: str, path: Path) -> dict[str, Any]:
+    value = payload.setdefault(key, {})
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Chrome profile metadata field must be an object: {path}::{key}"
+        )
+    return value
+
+
+def ensure_chrome_profile_display_name(chrome_profile: str) -> None:
+    profile_root = Path(chrome_profile)
+    profile_root.mkdir(parents=True, exist_ok=True)
+
+    local_state_path = profile_root / "Local State"
+    local_state = read_chrome_json_object(local_state_path)
+    profile_state = ensure_nested_object(local_state, "profile", local_state_path)
+    info_cache = ensure_nested_object(profile_state, "info_cache", local_state_path)
+    default_cache = ensure_nested_object(
+        info_cache, CHROME_PROFILE_INTERNAL_DIR, local_state_path
+    )
+    default_cache["name"] = CHROME_PROFILE_DISPLAY_NAME
+    default_cache["shortcut_name"] = CHROME_PROFILE_DISPLAY_NAME
+    default_cache["is_using_default_name"] = False
+    profile_state.setdefault("last_used", CHROME_PROFILE_INTERNAL_DIR)
+    profile_state.setdefault("last_active_profiles", [CHROME_PROFILE_INTERNAL_DIR])
+    write_chrome_json_object(local_state_path, local_state)
+
+    preferences_path = profile_root / CHROME_PROFILE_INTERNAL_DIR / "Preferences"
+    preferences = read_chrome_json_object(preferences_path)
+    preferences_profile = ensure_nested_object(preferences, "profile", preferences_path)
+    preferences_profile["name"] = CHROME_PROFILE_DISPLAY_NAME
+    preferences_profile["using_default_name"] = False
+    write_chrome_json_object(preferences_path, preferences)
+
+
+def chrome_profile_appears_open(chrome_profile: str) -> bool:
+    profile_root = Path(chrome_profile)
+    return any(os.path.lexists(profile_root / name) for name in CHROME_PROFILE_LOCK_FILES)
 
 
 def init_chrome_profile(chrome_profile: str) -> None:
     Path(chrome_profile).mkdir(parents=True, exist_ok=True)
+    if chrome_profile_appears_open(chrome_profile):
+        raise ValueError(
+            "Chrome profile appears to be open; close the dedicated Pinterest Chrome "
+            "window before refreshing the display name"
+        )
+    ensure_chrome_profile_display_name(chrome_profile)
     save_chrome_profile_config(chrome_profile)
 
 
@@ -432,6 +506,7 @@ def main() -> int:
         response: dict[str, Any] = {
             "ok": not profile_errors,
             "chromeProfile": payload["chromeProfile"],
+            "chromeProfileName": CHROME_PROFILE_DISPLAY_NAME,
             "chromeProfileSource": profile_meta["source"],
             "errors": profile_errors,
             "warnings": profile_warnings,
@@ -466,6 +541,16 @@ def main() -> int:
 
     if args.mode == "validate" or errors:
         return print_json(response, 0 if not errors else 1)
+
+    if payload["chromeProfile"] and chrome_profile_appears_open(payload["chromeProfile"]):
+        response["warnings"].append(
+            "Chrome profile appears to be open; skipped display name refresh"
+        )
+    elif payload["chromeProfile"]:
+        try:
+            ensure_chrome_profile_display_name(payload["chromeProfile"])
+        except Exception as exc:  # noqa: BLE001
+            response["warnings"].append(f"failed to apply Chrome profile display name: {exc}")
 
     try:
         execution = run_publish(payload, args.mode, args.timeout)
