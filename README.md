@@ -306,11 +306,11 @@ python3 tools/feishu_pinterest_worker.py prepare --config .gstack/feishu-worker-
 python3 tools/feishu_pinterest_worker.py publish --config .gstack/feishu-worker-config.json --limit 1
 ```
 
-When the user provides a Feishu Base/wiki shared URL for setup, run `setup-base` instead of asking them to manually create tables or fields. It resolves the Base token, creates or completes the `Pins`, `Brands`, `Runs`, and `Runtime Locks` tables, adds all workflow fields, creates the `pinterest_profile_publish` runtime lock row, writes `.gstack/feishu-worker-config.json`, and prints the user-facing usage steps.
+When the user provides a Feishu Base/wiki shared URL for setup, run `setup-base` instead of asking them to manually create tables or fields. It resolves the Base token, creates or completes the `Products`, `Pins`, `Brands`, `Runs`, and `Runtime Locks` tables, adds all workflow fields, creates the `pinterest_profile_publish` runtime lock row, writes `.gstack/feishu-worker-config.json`, and prints the user-facing usage steps.
 
 Add `--use-chrome-cdp` to `onboard` and `publish` when the Pinterest dedicated Chrome is already open with CDP on `127.0.0.1:9222`. Do not rely on onboarding CDP success unless publish will use the same flag.
 
-Run `onboard` first in Hermes. It returns a structured checklist that tells the agent and user exactly which setup step is still missing: dependency install, Hermes run identity, Feishu CLI auth, local Feishu config, Feishu table doctor, Pinterest Chrome profile, Pinterest login, and publish singleton protection.
+Run `onboard` first in Hermes. It returns a structured checklist that tells the agent and user exactly which setup step is still missing: dependency install, Hermes run identity, Feishu CLI auth, local Feishu config, Feishu table doctor, whether Pins are linked to the Products table, Pinterest Chrome profile, Pinterest login, and publish singleton protection.
 It also checks the public Pinterest AutoPin Skill version. If a newer version is available, onboarding returns a non-blocking `skill_update` action so the agent can ask the user whether to upgrade before continuing.
 
 After Pinterest login is confirmed, the normal next step is Feishu setup. If onboarding reports `feishu_cli` or `feishu_auth`, install `lark-cli`, keep it on `PATH`, and authorize the required scopes:
@@ -427,17 +427,19 @@ Official `lark-cli` uses:
 `prepare` and `publish` require either an atomic Feishu compare-update lock or explicit `hermes_singleton` lock modes. If the CLI does not expose atomic compare-update and singleton mode is not configured, the worker refuses to mutate rows instead of using a non-atomic fallback.
 For official `lark-cli`, use `hermes_singleton` only after the Hermes schedules are configured with max concurrency 1.
 
-`prepare` claims ready rows, downloads `source_image`, generates higher-intent Pinterest draft fields, uploads `processed_image`, and moves rows to human review. `publish` only uses the approved `final_image` attachment when it is present, then downloads it into the run temp directory before calling the Pinterest publisher.
+`prepare` claims ready rows, requires each Pin to link to a complete Products row, downloads `source_image`, generates higher-intent Pinterest draft fields, uploads `processed_image`, and moves rows to human review. `publish` also reads the linked Products row so the Etsy URL and product facts come from the product source of truth, then downloads the approved `final_image` into the run temp directory before calling the Pinterest publisher.
 
 The worker keeps all output in the existing draft fields; no extra Feishu fields are required. Draft generation now does five things:
 
-- Reads product information from `product_name`, `product_description`, `product_link`, `pinterest_board`, `brand_name`, `keywords`, `tags`, and `notes`.
+- Reads product information from the linked `Products` row: `product_name`, `product_description`, `product_link`, optional `brand_name`, `keywords`, and `notes`. Pins provide workflow inputs such as `pinterest_board`, images, status, and human-reviewed final fields.
 - Extracts lightweight image signals from the downloaded image path: dimensions, orientation, filename product terms, and filename style/material terms.
 - Chooses a Pinterest search intent such as gift, personalized gift, occasion gift, home decor, or printable/download.
 - Writes Etsy-conversion copy: title with search intent, description with a clear Etsy click cue, tags with product/audience/style terms, and alt text.
 - Runs a quality gate before writing drafts. It checks title length, product/search term coverage, description length, Etsy click cue, tag count, `#EtsyFinds`, and alt text.
 
-This is a deterministic worker-side quality engine. If Hermes performs model-based image understanding or copywriting before or around `prepare`, it should still treat product fields as the source of truth, use image observations only for visible details, avoid unsupported claims, and write structured draft fields back to the same Pins row for human review.
+The product check fails if Products has no records, if no sampled product has the required name/description/link, if a ready or approved Pin is not linked to Products, or if the linked product is missing a usable product name, a description of at least 20 characters, or an absolute `http`/`https` Etsy URL.
+
+This is a deterministic worker-side quality engine. If Hermes performs model-based image understanding or copywriting before or around `prepare`, it should still treat the linked Products row as the source of truth, use image observations only for visible details, avoid unsupported claims, and write structured draft fields back to the same Pins row for human review.
 
 Publish safety order:
 

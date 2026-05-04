@@ -79,6 +79,24 @@ def config() -> WorkerConfig:
     )
 
 
+def product_config() -> WorkerConfig:
+    return WorkerConfig(
+        "app",
+        TableConfig("pins", {"product": "product", "status": "status"}),
+        TableConfig("brands"),
+        TableConfig("runs"),
+        TableConfig("locks"),
+        products=TableConfig(
+            "products",
+            {
+                "product_name": "product_name",
+                "product_description": "product_description",
+                "product_link": "product_link",
+            },
+        ),
+    )
+
+
 class WorkerPrepareTest(unittest.TestCase):
     def test_prepare_with_no_records_reports_no_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -160,6 +178,96 @@ class WorkerPrepareTest(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(0, result.processed)
         self.assertEqual(1, result.skipped)
+
+    def test_product_check_requires_linked_complete_etsy_product(self) -> None:
+        record = {
+            "record_id": "pin-1",
+            "fields": {
+                "status": "待 AI 生成",
+                "product": [{"record_id": "product-1"}],
+                "source_image": [{"file_token": "source-token", "name": "source.jpg"}],
+            },
+        }
+        product = {
+            "record_id": "product-1",
+            "fields": {
+                "product_name": "Handmade Mug",
+                "product_description": "Too short",
+                "product_link": "https://example.com/listing/1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = FeishuPinterestWorker(
+                product_config(),
+                RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
+                FakeStore([record], [product]),
+                NoopPublisher(),
+            )
+
+            result = worker.product_check()
+
+        self.assertFalse(result.ok)
+        self.assertIn("Products table has no complete product records", result.errors)
+        self.assertTrue(any("must be an Etsy URL" in error for error in result.errors))
+
+    def test_product_check_requires_pin_product_relation(self) -> None:
+        record = {
+            "record_id": "pin-1",
+            "fields": {
+                "status": "待 AI 生成",
+                "source_image": [{"file_token": "source-token", "name": "source.jpg"}],
+            },
+        }
+        product = {
+            "record_id": "product-1",
+            "fields": {
+                "product_name": "Handmade Mug",
+                "product_description": "A ceramic mug for quiet mornings.",
+                "product_link": "https://www.etsy.com/listing/1/handmade-mug",
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = FeishuPinterestWorker(
+                product_config(),
+                RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
+                FakeStore([record], [product]),
+                NoopPublisher(),
+            )
+
+            result = worker.product_check()
+
+        self.assertFalse(result.ok)
+        self.assertIn("Pin pin-1 is not linked to a Products record", result.errors)
+
+    def test_product_check_requires_approved_pin_product_relation(self) -> None:
+        record = {
+            "record_id": "pin-1",
+            "fields": {
+                "status": "已批准待发布",
+                "scheduled_at": "2000-01-01T00:00:00Z",
+                "source_image": [{"file_token": "source-token", "name": "source.jpg"}],
+            },
+        }
+        product = {
+            "record_id": "product-1",
+            "fields": {
+                "product_name": "Handmade Mug",
+                "product_description": "A ceramic mug for quiet mornings.",
+                "product_link": "https://www.etsy.com/listing/1/handmade-mug",
+            },
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = FeishuPinterestWorker(
+                product_config(),
+                RuntimeContext("run-1", "run-1", "agent-1", "job-1", Path(temp_dir), ""),
+                FakeStore([record], [product]),
+                NoopPublisher(),
+            )
+
+            result = worker.product_check()
+
+        self.assertFalse(result.ok)
+        self.assertIn("Pin pin-1 is not linked to a Products record", result.errors)
 
 
 if __name__ == "__main__":

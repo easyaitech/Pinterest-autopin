@@ -18,6 +18,7 @@ class FakeLarkRunner:
     def __init__(self) -> None:
         self.tables: dict[str, dict] = {}
         self.fields: dict[str, dict[str, dict]] = {}
+        self.field_bodies: list[dict] = []
         self.records: dict[str, list[dict]] = {}
         self.commands: list[list[str]] = []
 
@@ -35,7 +36,7 @@ class FakeLarkRunner:
             self.fields[table_id] = {}
             first_fields = json.loads(command[command.index("--fields") + 1])
             for body in first_fields:
-                self._create_field(table_id, body["name"])
+                self._create_field(table_id, body)
             return completed({"data": {"table": table}})
         if "+field-list" in command:
             table_id = command[command.index("--table-id") + 1]
@@ -43,7 +44,7 @@ class FakeLarkRunner:
         if "+field-create" in command:
             table_id = command[command.index("--table-id") + 1]
             body = json.loads(command[command.index("--json") + 1])
-            return completed({"data": {"field": self._create_field(table_id, body["name"])}})
+            return completed({"data": {"field": self._create_field(table_id, body)}})
         if "+record-list" in command:
             table_id = command[command.index("--table-id") + 1]
             return completed({"data": {"items": self.records.get(table_id, [])}})
@@ -55,7 +56,11 @@ class FakeLarkRunner:
             return completed({"data": {"record": record}})
         return completed({"ok": True})
 
-    def _create_field(self, table_id: str, name: str) -> dict:
+    def _create_field(self, table_id: str, body: dict) -> dict:
+        name = str(body["name"])
+        captured = dict(body)
+        captured["table_id"] = table_id
+        self.field_bodies.append(captured)
         field = {"field_id": f"fld_{table_id}_{len(self.fields[table_id]) + 1}", "field_name": name}
         self.fields[table_id][name] = field
         return field
@@ -95,9 +100,14 @@ class FeishuSchemaTest(unittest.TestCase):
         self.assertEqual("hermes_singleton", config["prepare_lock_mode"])
         self.assertEqual("hermes_singleton", config["publish_lock_mode"])
         self.assertIn("pins", config["tables"])
-        self.assertIn("product_name", config["tables"]["pins"]["fields"])
+        self.assertIn("products", config["tables"])
+        self.assertIn("product", config["tables"]["pins"]["fields"])
+        self.assertNotIn("product_name", config["tables"]["pins"]["fields"])
+        self.assertIn("product_name", config["tables"]["products"]["fields"])
         self.assertIn("final_image", config["tables"]["pins"]["fields"])
         self.assertIn("runtime_locks", config["tables"])
+        product_link_body = next(body for body in runner.field_bodies if body["name"] == "商品")
+        self.assertEqual(config["tables"]["products"]["table_id"], product_link_body["link_table"])
         self.assertTrue(any("+record-upsert" in command for command in runner.commands))
         self.assertTrue(any("prepare" in line for line in result.usage))
 

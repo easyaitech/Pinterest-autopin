@@ -46,6 +46,23 @@ class ContentGenerationTest(unittest.TestCase):
         self.assertIn("print", signals.product_terms)
         self.assertIn("minimal", signals.style_terms)
 
+    def test_product_name_is_source_of_truth_over_old_draft_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "ceramic-mug.png"
+            image.write_bytes(png_header(1000, 1500))
+
+            draft = generate_pin_draft(
+                {
+                    "product_name": "Ceramic Coffee Mug",
+                    "draft_title": "Old Generic Draft",
+                    "product_description": "A ceramic mug for quiet mornings.",
+                },
+                image,
+            )
+
+        self.assertIn("Ceramic Coffee Mug", draft.title)
+        self.assertNotIn("Old Generic Draft", draft.title)
+
     def test_quality_gate_rejects_generic_non_etsy_copy(self) -> None:
         score, notes = quality_gate(
             {

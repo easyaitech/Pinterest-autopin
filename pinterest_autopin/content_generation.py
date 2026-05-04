@@ -151,8 +151,8 @@ OCCASION_TERMS = {
 
 def generate_pin_draft(fields: Mapping[str, Any], image_path: str | Path) -> PinDraft:
     product_name = _clean_text(
-        fields.get("draft_title")
-        or fields.get("product_name")
+        fields.get("product_name")
+        or fields.get("draft_title")
         or fields.get("title")
         or fields.get("source_title")
         or ""

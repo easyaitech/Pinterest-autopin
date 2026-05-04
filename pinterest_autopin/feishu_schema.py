@@ -97,13 +97,7 @@ PINS_FIELDS: tuple[FieldSpec, ...] = (
             "description": "必须关联 Products 表中的商品记录；prepare 会从商品表读取商品事实",
         },
     ),
-    _field("product_name", "商品名称", "text", "用于生成 Pin 标题的主要商品名"),
-    _field("product_description", "商品描述", "text", "用于生成 Pin 描述的商品卖点、材质、用途等信息"),
-    _field("product_link", "商品链接", "text", "发布到 Pinterest 的落地页链接", style={"type": "url"}),
     _field("pinterest_board", "Pinterest 画板", "text", "默认发布画板；人工终稿可用 final_board 覆盖"),
-    _field("brand_name", "品牌名称", "text", "可选；存在时会前置到草稿标题"),
-    _field("keywords", "关键词", "text", "可选；用于草稿标签"),
-    _field("notes", "备注", "text", "可选；补充生成要求、禁用词或人工说明"),
     _field("source_image", "原始图片", "attachment", "准备阶段下载并处理的原图附件"),
     FieldSpec(
         "status",

@@ -53,7 +53,7 @@ class FakeStore:
                 "fields": {
                     "product_name": "Product",
                     "product_description": "A product description with enough detail.",
-                    "product_link": "https://example.com",
+                    "product_link": "https://www.etsy.com/listing/123/product",
                 },
             }
         ]

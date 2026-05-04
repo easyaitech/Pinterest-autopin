@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from urllib.parse import urlparse
 
 from .content_generation import generate_pin_draft
 from .feishu_cli import FeishuCli
@@ -149,8 +150,11 @@ class FeishuPinterestWorker:
         if not valid_products:
             errors.append("Products table has no complete product records")
 
-        ready_pins = self._list_prepare_candidates(10)
-        for record in ready_pins[:10]:
+        try:
+            checked_pins = self._product_check_candidates(10)
+        except Exception as exc:  # noqa: BLE001
+            return WorkerResult(False, "product-check", errors=(f"failed to read Pins for product check: {exc}",))
+        for record in checked_pins[:20]:
             fields = self._pin_fields(record)
             record_id = _record_id(record) or "<unknown>"
             if not _linked_record_id(fields.get("product")):
@@ -378,6 +382,18 @@ class FeishuPinterestWorker:
             page_size=max(target, 50),
         )
 
+    def _product_check_candidates(self, target: int) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for record in [*self._list_prepare_candidates(target), *self._list_publish_candidates(target)]:
+            record_id = _record_id(record)
+            key = record_id or str(id(record))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(record)
+        return candidates
+
     def _prepare_pin(self, record_id: str, fields: Mapping[str, Any]) -> dict[str, Any]:
         source_path = self._prepare_source_image(record_id, fields)
         prepared = prepare_image(source_path, self.runtime.temp_dir / "prepared-images")
@@ -568,9 +584,17 @@ def _product_validation_errors(fields: Mapping[str, Any]) -> list[str]:
         errors.append("linked product is missing product_name")
     if len(product_description) < 20:
         errors.append("linked product product_description must be at least 20 characters")
-    if not (product_link.startswith("http://") or product_link.startswith("https://")):
+    parsed_link = urlparse(product_link)
+    if parsed_link.scheme not in {"http", "https"} or not parsed_link.netloc:
         errors.append("linked product product_link must be an absolute URL")
+    elif not _is_etsy_host(parsed_link.netloc):
+        errors.append("linked product product_link must be an Etsy URL")
     return errors
+
+
+def _is_etsy_host(host: str) -> bool:
+    normalized = host.lower().split(":", 1)[0].strip(".")
+    return normalized in {"etsy.com", "etsy.me"} or normalized.endswith(".etsy.com") or normalized.endswith(".etsy.me")
 
 
 def _merge_pin_product_fields(pin_fields: Mapping[str, Any], product_fields: Mapping[str, Any]) -> dict[str, Any]:

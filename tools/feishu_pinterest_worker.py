@@ -131,6 +131,16 @@ def main() -> int:
         )
         if args.command == "doctor":
             result = worker.doctor()
+            if result.ok:
+                product_result = worker.product_check()
+                if not product_result.ok:
+                    result = WorkerResult(
+                        False,
+                        "doctor",
+                        processed=product_result.processed,
+                        skipped=product_result.skipped,
+                        errors=product_result.errors,
+                    )
         elif args.command == "prepare":
             result = worker.prepare(limit=args.limit)
         else:

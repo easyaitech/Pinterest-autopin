@@ -1,6 +1,6 @@
 ---
 name: pinterest-autopin
-version: 1.3.6
+version: 1.3.7
 description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
 ---
 
@@ -28,6 +28,7 @@ After `setup-base`, summarize the printed `usage` steps for the user.
 
 Treat `readyForPrepare: true` as permission to run content generation. Treat `readyForPublish: true` as permission to schedule final publishing. If `nextActions` is not empty, guide the user through those actions first.
 Use `--target prepare` before generation jobs and `--target publish` before final publish jobs. If official `lark-cli` is used, pass the same `--prepare-singleton-confirmed` or `--publish-singleton-confirmed` flag to the real Hermes worker command, unless the local config already sets the matching `*_lock_mode` to `hermes_singleton`.
+The onboarding checklist must include `product_table_link`. This check verifies that ready or approved Pins are linked to the Products table and that Products has enough product facts for generation: product name, a useful description, and an absolute Etsy URL.
 If onboarding returns `skill_update`, ask the user whether to upgrade before running mutable workflow commands. Only run the returned upgrade command after explicit approval.
 
 ## Ground rules
@@ -202,7 +203,7 @@ The local Feishu config should stay in an ignored file such as `.gstack/feishu-w
 
 Only continue to `test` or `final` with direct Pin fields when the user explicitly asks for one-off Pin validation, dry-run filling, or final publishing.
 
-Worker-side `prepare` now uses a deterministic quality engine before writing draft fields. It reads existing product fields, extracts lightweight image signals from the downloaded image path, chooses a Pinterest search intent, writes Etsy-conversion copy, and runs a quality gate. It does not add new Feishu fields. Hermes may still perform model-based image understanding or copywriting outside the worker; when it does, product fields are the source of truth and image observations should only add visible details.
+Worker-side `prepare` now uses a deterministic quality engine before writing draft fields. It reads product facts from the linked Products row, extracts lightweight image signals from the downloaded image path, chooses a Pinterest search intent, writes Etsy-conversion copy, and runs a quality gate. It does not add extra draft fields. Hermes may still perform model-based image understanding or copywriting outside the worker; when it does, the linked Products row is the source of truth and image observations should only add visible details.
 
 7. For a preview that fills one explicit Pinterest form but does not publish:
 
