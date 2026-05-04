@@ -13,6 +13,7 @@ const { classifyPinterestLoginState } = require('./pinterest_login_state');
 
 // 配置
 const CDP_PORT = 9222;
+const PIN_BUILDER_URL = 'https://www.pinterest.com/pin-builder/';
 const DEFAULT_CHROME_ARGS = [
   '--disable-blink-features=AutomationControlled'
 ];
@@ -122,6 +123,60 @@ async function createBrowserSession(chromeProfile) {
   };
 }
 
+function pinterestPageScore(page) {
+  const currentUrl = page.url() || '';
+  if (currentUrl === 'about:blank') return 10;
+
+  try {
+    const parsed = new URL(currentUrl);
+    if (!parsed.hostname.endsWith('pinterest.com')) return 0;
+    if (parsed.pathname.includes('/pin-builder')) return 40;
+    return 30;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+async function getPinterestAutomationPage(context) {
+  const pages = context.pages().filter(page => !page.isClosed());
+  const reusable = pages
+    .map((page, index) => ({ page, index, score: pinterestPageScore(page) }))
+    .filter(candidate => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0];
+
+  if (reusable) {
+    logInfo(`📍 复用已有标签页: ${reusable.page.url() || 'about:blank'}`);
+    await reusable.page.bringToFront().catch((e) => {
+      logWarn(`切换到复用标签页失败，尝试继续: ${e.message}`);
+    });
+    return reusable.page;
+  }
+
+  logInfo('📍 未找到可复用标签页，创建一个新标签页...');
+  const page = await context.newPage();
+  await page.bringToFront().catch((e) => {
+    logWarn(`切换到新标签页失败，尝试继续: ${e.message}`);
+  });
+  return page;
+}
+
+async function openPinBuilder(page, options = {}) {
+  const { waitUntil = 'networkidle', resetDraft = false } = options;
+  if (resetDraft && page.url() !== 'about:blank') {
+    await page.goto('about:blank', {
+      waitUntil: 'domcontentloaded',
+      timeout: 10000
+    }).catch((e) => {
+      logWarn(`清理旧页面状态超时，尝试继续: ${e.message}`);
+    });
+  }
+
+  await page.goto(PIN_BUILDER_URL, {
+    waitUntil,
+    timeout: 30000
+  });
+}
+
 function randomDelay(min = 2, max = 5) {
   return new Promise(resolve => setTimeout(resolve, (Math.floor(Math.random() * (max - min + 1)) + min) * 1000));
 }
@@ -135,11 +190,8 @@ async function checkPinterestLogin(chromeProfile) {
 
   try {
     browserSession = await createBrowserSession(chromeProfile);
-    const page = await browserSession.context.newPage();
-    await page.goto('https://www.pinterest.com/pin-builder/', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    }).catch((e) => {
+    const page = await getPinterestAutomationPage(browserSession.context);
+    await openPinBuilder(page, { waitUntil: 'domcontentloaded' }).catch((e) => {
       logWarn(`导航超时，尝试继续: ${e.message}`);
     });
     await page.waitForFunction(() => {
@@ -263,22 +315,16 @@ async function publishPin(options) {
 
     logInfo('✅ 已连接');
 
-    // 创建新页面（每次都打开全新的 Pin Builder）
     const ctx = browserSession.context;
 
     logInfo(`当前 ${browserSession.pageCount()} 个页面`);
 
-    // 创建全新标签页
-    logInfo('📍 创建新标签页...');
-    const page = await ctx.newPage();
+    const page = await getPinterestAutomationPage(ctx);
 
     // 导航到 pin-builder
     logInfo('📍 打开 Pin Builder...');
     try {
-      await page.goto('https://www.pinterest.com/pin-builder/', {
-        waitUntil: 'networkidle',
-        timeout: 30000
-      });
+      await openPinBuilder(page, { waitUntil: 'networkidle', resetDraft: true });
     } catch (e) {
       logWarn(`导航超时，尝试继续...`);
     }
