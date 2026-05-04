@@ -1,6 +1,6 @@
 ---
 name: pinterest-autopin
-version: 1.3.3
+version: 1.3.4
 description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
 ---
 
@@ -84,6 +84,8 @@ Optional:
 `link`, when present, must be an absolute `http` or `https` URL.
 `chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it is omitted, the CLI resolves a stable profile automatically.
 
+The dedicated Chrome profile display name is `Pinterest AutoPin` after initialization, so the user can tell it apart from personal Chrome profiles.
+
 Default profile resolution order:
 
 1. CLI `--chrome-profile`
@@ -114,11 +116,13 @@ python3 tools/pinterest_publish_pin.py --input /path/to/request.json --mode vali
 python3 tools/pinterest_publish_pin.py --print-chrome-profile
 ```
 
-If the profile has not been created yet, initialize and remember it:
+If the profile has not been created yet, initialize it, apply the `Pinterest AutoPin` display name, and remember it:
 
 ```bash
 python3 tools/pinterest_publish_pin.py --init-chrome-profile
 ```
+
+For an existing dedicated profile, rerun the init command with that Chrome window closed to refresh the display name without changing the profile directory.
 
 5. Before using `test` or `final`, confirm the account session with:
 
