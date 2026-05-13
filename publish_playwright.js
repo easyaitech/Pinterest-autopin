@@ -609,27 +609,37 @@ function compressImage(imagePath, maxWidth = 2000) {
 }
 
 async function publishPin(options) {
-  const { image, title, board, link, description, altText, chromeProfile, creationUrl = DEFAULT_PIN_CREATION_URL } = options;
+  const { images = [], title, board, link, description, chromeProfile, creationUrl = DEFAULT_PIN_CREATION_URL } = options;
+  // Backward compat: flat image/altText → images array
+  const resolvedImages = images.length > 0
+    ? images
+    : (options.image ? [{ path: options.image, altText: options.altText || '' }] : []);
+  const isCarousel = resolvedImages.length > 1;
   let browserSession;
-  
+
   console.log('='.repeat(60));
-  console.log('Pinterest AutoPin - Playwright');
+  console.log(`Pinterest AutoPin - Playwright${isCarousel ? ` (Carousel: ${resolvedImages.length} images)` : ''}`);
   console.log('='.repeat(60));
-  
-  if (!fs.existsSync(image)) {
-    throw new Error(`图片不存在: ${image}`);
+
+  for (const img of resolvedImages) {
+    if (!fs.existsSync(img.path)) {
+      throw new Error(`图片不存在: ${img.path}`);
+    }
   }
-  
-  logInfo(`图片: ${image}`);
+
+  logInfo(`图片: ${resolvedImages.map(img => path.basename(img.path)).join(', ')}`);
   logInfo(`标题: ${title}`);
   logInfo(`链接: ${link || '(无)'}`);
 
   if ((TEST_MODE || FINAL_MODE) && !board) {
     throw new Error('测试模式和发布模式必须提供 board，避免发布到错误的 Board');
   }
-  
+
   // 压缩图片
-  const compressedImage = compressImage(image, 2000);
+  const compressedImages = resolvedImages.map(img => ({
+    ...img,
+    compressedPath: compressImage(img.path, 2000)
+  }));
   
   logInfo(`🔗 打开 Chrome...`);
   
@@ -662,9 +672,9 @@ async function publishPin(options) {
     }
 
     // 步骤 1: 上传图片
-    logInfo('\n📤 步骤 1: 上传图片...');
+    const filePaths = compressedImages.map(img => img.compressedPath);
+    logInfo(`\n📤 步骤 1: 上传图片 (${filePaths.length} 张)...`);
 
-    // 每次都重新上传图片，不要跳过！
     // 先尝试清除已上传的图片（如果有）
     let uploadSuccess = false;
     try {
@@ -678,7 +688,6 @@ async function publishPin(options) {
       // 忽略错误，继续上传
     }
 
-    // 尝试查找文件上传 input
     let attempts = 0;
     const maxAttempts = 3;
 
@@ -688,22 +697,20 @@ async function publishPin(options) {
 
       const fileInput = await page.$('input[type="file"]');
       if (fileInput) {
-        await fileInput.setInputFiles(compressedImage);
-        logInfo(`✅ 文件已选择: ${path.basename(compressedImage)}`);
-        await randomDelay(3);
+        await fileInput.setInputFiles(filePaths);
+        logInfo(`✅ 文件已选择: ${filePaths.map(f => path.basename(f)).join(', ')}`);
+        await randomDelay(isCarousel ? 5 : 3);
 
-        // 验证图片是否上传成功
         const newImage = await page.$(
           'img[src^="blob:"], img[data-test-id="pin-image"], [data-test-id="story-pin-image-block"] img, [data-test-id*="image"] img, img[src*="pinimg.com"]'
         );
         if (newImage) {
           uploadSuccess = true;
-          logInfo('✅ 图片上传成功');
+          logInfo(`✅ 图片上传成功${isCarousel ? ` (轮播 ${filePaths.length} 张)` : ''}`);
         }
       } else {
         logWarn('⚠️ 未找到文件上传 input，尝试点击上传区域...');
 
-        // 点击上传触发区域
         const uploadArea = await page.$('[data-test-id*="media"], div[class*="upload"], div[role="button"]');
         if (uploadArea) {
           try {
@@ -1025,8 +1032,9 @@ async function publishPin(options) {
     }
 
     // 步骤 6: 添加 Alt Text
-    if (altText) {
-      logInfo('\n🖼️ 步骤 6: 添加 Alt Text...');
+    const altTexts = compressedImages.map(img => img.altText).filter(Boolean);
+    if (altTexts.length > 0) {
+      logInfo(`\n🖼️ 步骤 6: 添加 Alt Text (${altTexts.length} 条)...`);
 
       await clickFirstButtonByLabels(page, [
         'more options',
@@ -1036,41 +1044,7 @@ async function publishPin(options) {
       ]).catch(() => ({ success: false }));
       await randomDelay(1);
 
-      // 1. 检查 Alt Text 输入框是否存在，不存在则点击按钮
-      const needClickButton = await page.evaluate(() => {
-        const ta = document.querySelector('#storyboardAltText, textarea[id^="pin-draft-alttext"], textarea[data-test-id*="alt"], [data-test-id*="alt"] textarea');
-        return !ta;
-      });
-
-      if (needClickButton) {
-        // 点击 Add alt text 按钮
-        const clickResult = await page.evaluate(() => {
-          const labels = ['add alt', 'alt text', '代替テキスト', '代替テキストを追加', '替代文字', '替代文本', '添加替代文本', '新增替代文字'];
-          const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-          const matches = value => {
-            const text = normalize(value);
-            return labels.some(label => text.includes(normalize(label)));
-          };
-          const btns = document.querySelectorAll('button, div[role="button"]');
-          for (const btn of btns) {
-            if (matches(btn.textContent) || matches(btn.getAttribute('aria-label'))) {
-              btn.click();
-              return true;
-            }
-          }
-          return false;
-        });
-
-        if (clickResult) {
-          logInfo('✅ 已点击 Add alt text 按钮');
-          await randomDelay(2);
-        } else {
-          logWarn('⚠️ 未找到 Add alt text 按钮');
-        }
-      }
-
-      // 2. 填写 Alt Text
-      const altSelector = await fillFirstVisibleInput(page, [
+      const altSelectors = [
         '#storyboardAltText',
         'textarea[id^="pin-draft-alttext"]',
         'textarea[data-test-id*="alt"]',
@@ -1086,43 +1060,83 @@ async function publishPin(options) {
         'textarea[aria-label*="代替"]',
         'textarea[placeholder*="替代"]',
         'textarea[aria-label*="替代"]'
-      ], altText) || await fillTextControlByHints(page, [
-        'alt text',
-        'alternative text',
-        'pin-draft-alttext',
-        '代替テキスト',
-        '代替',
-        '替代文本',
-        '替代文字'
-      ], altText);
+      ];
 
-      const altResult = altSelector
-        ? { success: true, length: altText.length, selector: altSelector }
-        : await page.evaluate((alt) => {
+      const altHints = [
+        'alt text', 'alternative text', 'pin-draft-alttext',
+        '代替テキスト', '代替', '替代文本', '替代文字'
+      ];
+
+      const altAddLabels = [
+        'add alt', 'alt text', '代替テキスト', '代替テキストを追加',
+        '替代文字', '替代文本', '添加替代文本', '新增替代文字'
+      ];
+
+      async function fillOneAltText(altValue) {
+        const needClickButton = await page.evaluate(() => {
           const ta = document.querySelector('#storyboardAltText, textarea[id^="pin-draft-alttext"], textarea[data-test-id*="alt"], [data-test-id*="alt"] textarea');
-          if (ta) {
-            try {
-              const nativeSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, 'value'
-              ).set;
-              nativeSetter.call(ta, alt);
-            } catch (e) {
-              ta.value = alt;
+          return !ta;
+        });
+        if (needClickButton) {
+          const clickResult = await page.evaluate((labels) => {
+            const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const matches = value => { const text = normalize(value); return labels.some(label => text.includes(normalize(label))); };
+            const btns = document.querySelectorAll('button, div[role="button"]');
+            for (const btn of btns) {
+              if (matches(btn.textContent) || matches(btn.getAttribute('aria-label'))) { btn.click(); return true; }
             }
+            return false;
+          }, altAddLabels);
+          if (clickResult) await randomDelay(1);
+        }
+        const selector = await fillFirstVisibleInput(page, altSelectors, altValue)
+          || await fillTextControlByHints(page, altHints, altValue);
+        if (selector) return { success: true, length: altValue.length, selector };
+        return await page.evaluate((alt) => {
+          const ta = document.querySelector('#storyboardAltText, textarea[id^="pin-draft-alttext"], textarea[data-test-id*="alt"], [data-test-id*="alt"] textarea');
+          if (!ta) return { success: false };
+          try { Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(ta, alt); } catch (_e) { ta.value = alt; }
+          ['input', 'change'].forEach(evt => ta.dispatchEvent(new Event(evt, { bubbles: true, cancelable: true })));
+          return { success: ta.value === alt, length: ta.value.length, selector: 'textarea fallback' };
+        }, altValue);
+      }
 
-            ['input', 'change'].forEach(evt => {
-              ta.dispatchEvent(new Event(evt, { bubbles: true, cancelable: true }));
-            });
-
-            return { success: ta.value === alt, length: ta.value.length, selector: 'textarea fallback' };
-          }
-          return { success: false };
-        }, altText);
-
-      if (altResult.success) {
-        logInfo(`✅ Alt Text 已填写 (${altResult.selector || 'alt text'}, ${altResult.length} 字符)`);
+      if (!isCarousel) {
+        const altResult = await fillOneAltText(altTexts[0]);
+        if (altResult.success) {
+          logInfo(`✅ Alt Text 已填写 (${altResult.selector || 'alt text'}, ${altResult.length} 字符)`);
+        } else {
+          throw new Error('Alt Text 未能确认写入，终止发布');
+        }
       } else {
-        throw new Error('Alt Text 未能确认写入，终止发布');
+        // Carousel: try to set alt text per image by clicking each carousel thumbnail
+        const carouselThumbs = await page.$$('[data-test-id*="carousel"] [role="button"], [data-test-id*="carousel-card"], [data-test-id*="storyboard-page"]');
+        if (carouselThumbs.length >= altTexts.length) {
+          for (let idx = 0; idx < altTexts.length; idx++) {
+            if (!altTexts[idx]) continue;
+            try {
+              await carouselThumbs[idx].click();
+              await randomDelay(1);
+              const altResult = await fillOneAltText(altTexts[idx]);
+              if (altResult.success) {
+                logInfo(`✅ 图 ${idx + 1} Alt Text 已填写 (${altResult.length} 字符)`);
+              } else {
+                logWarn(`⚠️ 图 ${idx + 1} Alt Text 未能写入，需手动补填`);
+              }
+            } catch (e) {
+              logWarn(`⚠️ 图 ${idx + 1} Alt Text 设置失败: ${e.message}`);
+            }
+          }
+        } else {
+          // Fallback: fill first alt text into the visible field
+          logWarn(`⚠️ 未找到轮播缩略图 (期望 ${altTexts.length}，找到 ${carouselThumbs.length})，填写第 1 张 Alt Text`);
+          const altResult = await fillOneAltText(altTexts[0]);
+          if (altResult.success) {
+            logInfo(`✅ 图 1 Alt Text 已填写，其余 ${altTexts.length - 1} 张需手动补填`);
+          } else {
+            logWarn('⚠️ Alt Text 未能写入，需全部手动补填');
+          }
+        }
       }
     }
 
@@ -1243,7 +1257,8 @@ async function publishPin(options) {
     const result = {
       ok: true,
       mode: FINAL_MODE ? 'final' : TEST_MODE ? 'test' : 'interactive',
-      image,
+      images: resolvedImages.map(img => img.path),
+      isCarousel,
       title,
       board,
       link,
@@ -1321,12 +1336,24 @@ if (FINAL_MODE) {
 }
 
 // 从 JSON 或命令行参数获取 pin 数据
-const image = pinData?.image || args.image;
+// images[] array (new format) or flat image/altText (backward compat)
+let images = [];
+if (Array.isArray(pinData?.images) && pinData.images.length > 0) {
+  images = pinData.images.map(img => ({
+    path: String(img.path || ''),
+    altText: String(img.altText || img.alt_text || '')
+  }));
+} else {
+  const flatImage = pinData?.image || args.image;
+  const flatAltText = pinData?.altText || pinData?.alt_text || args['alt-text'] || '';
+  if (flatImage) {
+    images = [{ path: flatImage, altText: flatAltText }];
+  }
+}
 const title = pinData?.title || args.title;
 const board = pinData?.board || args.board || '';
 const link = pinData?.link || args.link || '';
 const description = pinData?.description || args.description || '';
-const altText = pinData?.altText || pinData?.alt_text || args['alt-text'] || '';
 const chromeProfile = pinData?.chromeProfile || pinData?.chrome_profile || args['chrome-profile'] || args.chromeProfile || '';
 let creationUrl;
 try {
@@ -1354,15 +1381,15 @@ if (CHECK_LOGIN_MODE) {
     });
     process.exit(1);
   });
-} else if (!image || !title) {
-  logError('缺少参数: --image, --title');
+} else if (!images.length || !title) {
+  logError('缺少参数: --image (或 images[]), --title');
   console.log('\n用法:');
   console.log('  命令行: node publish_playwright.js --image <图片> --title <标题> --description <描述> --final');
   console.log('  JSON文件: node publish_playwright.js --input <json文件> --final');
   writeStructuredResult(RESULT_JSON_PATH, {
     ok: false,
-    error: '缺少参数: --image, --title',
-    image,
+    error: '缺少参数: images/image, title',
+    images,
     title,
     completedAt: new Date().toISOString()
   });
@@ -1372,7 +1399,7 @@ if (CHECK_LOGIN_MODE) {
   writeStructuredResult(RESULT_JSON_PATH, {
     ok: false,
     error: '测试模式和发布模式必须提供 board',
-    image,
+    images,
     title,
     board,
     link,
@@ -1381,20 +1408,19 @@ if (CHECK_LOGIN_MODE) {
   process.exit(1);
 } else {
   publishPin({
-    image: image,
-    title: title,
-    board: board,
-    link: link,
-    description: description,
-    altText: altText,
-    chromeProfile: chromeProfile,
-    creationUrl: creationUrl
+    images,
+    title,
+    board,
+    link,
+    description,
+    chromeProfile,
+    creationUrl
   }).catch(err => {
     logError(`错误: ${err.message}`);
     writeStructuredResult(RESULT_JSON_PATH, {
       ok: false,
       error: err.message,
-      image,
+      images,
       title,
       board,
       link,

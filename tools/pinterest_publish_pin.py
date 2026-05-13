@@ -23,12 +23,10 @@ NODE_SCRIPT = REPO_ROOT / "publish_playwright.js"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PIN_URL_RE = re.compile(r"https?://(?:[a-z0-9-]+\.)?pinterest\.com/pin/[^\s\"'<>]+")
 TEXT_FIELDS = (
-    "image",
     "title",
     "board",
     "link",
     "description",
-    "altText",
     "chromeProfile",
     "creationUrl",
 )
@@ -179,18 +177,39 @@ def chrome_profile_metadata(source: str) -> dict[str, str]:
     }
 
 
+def normalize_images(payload: dict[str, Any], args: argparse.Namespace) -> list[dict[str, str]]:
+    """Build the images array from either ``images`` key or flat ``image``/``altText``."""
+    images_raw = payload.get("images")
+    if isinstance(images_raw, list) and images_raw:
+        result: list[dict[str, str]] = []
+        for item in images_raw:
+            if not isinstance(item, dict):
+                continue
+            result.append({
+                "path": str(item.get("path") or ""),
+                "altText": str(item.get("altText") or item.get("alt_text") or ""),
+            })
+        return result
+
+    image = args.image if args.image is not None else str(payload.get("image") or "")
+    alt_text = args.alt_text
+    if alt_text is None:
+        alt_text = payload.get("altText") or payload.get("alt_text") or payload.get("alt-text") or ""
+    if image:
+        return [{"path": image, "altText": str(alt_text)}]
+    return []
+
+
 def normalize_payload_with_meta(
     file_payload: dict[str, Any], args: argparse.Namespace
 ) -> tuple[dict[str, Any], dict[str, str]]:
     payload = dict(file_payload)
 
     overrides = {
-        "image": args.image,
         "title": args.title,
         "board": args.board,
         "link": args.link,
         "description": args.description,
-        "altText": args.alt_text,
         "chromeProfile": args.chrome_profile,
         "creationUrl": getattr(args, "creation_url", None),
     }
@@ -198,22 +217,16 @@ def normalize_payload_with_meta(
         if value is not None:
             payload[key] = value
 
-    alt_text = payload.get("altText")
-    if alt_text is None:
-        alt_text = payload.get("alt_text")
-    if alt_text is None:
-        alt_text = payload.get("alt-text")
-
     chrome_profile, chrome_profile_source = resolve_chrome_profile(payload, args)
     creation_url = resolve_creation_url(payload, args)
+    images = normalize_images(payload, args)
 
     normalized = {
-        "image": payload.get("image", ""),
+        "images": images,
         "title": payload.get("title", ""),
         "board": payload.get("board", ""),
         "link": payload.get("link", ""),
         "description": payload.get("description", ""),
-        "altText": "" if alt_text is None else alt_text,
         "chromeProfile": "" if chrome_profile is None else chrome_profile,
         "creationUrl": "" if creation_url is None else creation_url,
     }
@@ -304,20 +317,27 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
     warnings: list[str] = []
 
     for field in TEXT_FIELDS:
-        if not isinstance(payload[field], str):
+        if not isinstance(payload.get(field, ""), str):
             errors.append(f"{field} must be a string")
 
     if errors:
         return errors, warnings
 
     if mode != "check-login":
-        image_path = Path(payload["image"])
-        if not payload["image"].strip():
-            errors.append("image is required")
-        elif not image_path.is_absolute():
-            errors.append(f"image must be an absolute path: {payload['image']}")
-        elif not image_path.exists():
-            errors.append(f"image does not exist: {payload['image']}")
+        images = payload.get("images", [])
+        if not images:
+            errors.append("images array is required (or provide flat image field)")
+        else:
+            for i, img in enumerate(images):
+                img_path = img.get("path", "")
+                if not img_path:
+                    errors.append(f"images[{i}].path is required")
+                elif not Path(img_path).is_absolute():
+                    errors.append(f"images[{i}].path must be an absolute path: {img_path}")
+                elif not Path(img_path).exists():
+                    errors.append(f"images[{i}].path does not exist: {img_path}")
+            if len(images) > 5:
+                errors.append(f"images array has {len(images)} elements; Pinterest carousel limit is 5")
 
         if not payload["title"].strip():
             errors.append("title is required")

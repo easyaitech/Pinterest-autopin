@@ -50,12 +50,11 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
     def valid_payload(self) -> dict:
         return {
-            "image": self.make_image(),
+            "images": [{"path": self.make_image(), "altText": "Alt text"}],
             "title": "QA Pin",
             "board": "Example Board",
             "link": "https://example.com",
             "description": "Description",
-            "altText": "Alt text",
             "chromeProfile": "",
             "creationUrl": pinterest_publish_pin.DEFAULT_CREATION_URL,
         }
@@ -81,13 +80,13 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
     def test_image_path_must_be_absolute(self) -> None:
         payload = self.valid_payload()
-        payload["image"] = "relative.png"
+        payload["images"] = [{"path": "relative.png", "altText": ""}]
 
         errors, _warnings = pinterest_publish_pin.validate_payload(
             payload, fake_checks(), "validate"
         )
 
-        self.assertIn("image must be an absolute path: relative.png", errors)
+        self.assertIn("images[0].path must be an absolute path: relative.png", errors)
 
     def test_link_must_be_absolute_http_url(self) -> None:
         payload = self.valid_payload()
