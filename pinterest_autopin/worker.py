@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 from urllib.parse import urlparse
 
 from .content_generation import generate_pin_draft
@@ -436,27 +437,38 @@ class FeishuPinterestWorker:
         raise WorkerError("source_image attachment is required before prepare")
 
     def _publisher_request(self, record_id: str, fields: Mapping[str, Any]) -> dict[str, Any]:
-        image_path = self._publish_image(record_id, fields)
+        image_paths = self._publish_images(record_id, fields)
         product_fields = self._linked_product_fields(fields)
         merged_fields = _merge_pin_product_fields(fields, product_fields)
-        return _publisher_request(merged_fields, image_path)
+        return _publisher_request(merged_fields, image_paths)
 
     def _publish_image(self, record_id: str, fields: Mapping[str, Any]) -> str:
-        ref = _attachment_ref(fields.get("final_image"))
-        if ref:
-            return self._download_attachment(record_id, ref, "final-images")
-        path = str(fields.get("final_image_path") or fields.get("processed_image_path") or "").strip()
-        if path:
-            return path
+        return self._publish_images(record_id, fields)[0]
+
+    def _publish_images(self, record_id: str, fields: Mapping[str, Any]) -> list[str]:
+        refs = _attachment_refs(fields.get("final_image"))
+        if refs:
+            return [
+                self._download_attachment(
+                    record_id,
+                    ref,
+                    "final-images",
+                    suffix=f"-{index + 1}" if len(refs) > 1 else "",
+                )
+                for index, ref in enumerate(refs)
+            ]
+        paths = _path_values(fields.get("final_image_path")) or _path_values(fields.get("processed_image_path"))
+        if paths:
+            return paths
         raise WorkerError("final_image attachment is required before publish")
 
-    def _download_attachment(self, record_id: str, ref: AttachmentRef, subdir: str) -> str:
+    def _download_attachment(self, record_id: str, ref: AttachmentRef, subdir: str, *, suffix: str = "") -> str:
         download = getattr(self.store, "download_attachment", None)
         if not callable(download):
             raise WorkerError("Feishu attachment download is not available through the CLI boundary")
         output_dir = self.runtime.temp_dir / subdir
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{record_id}-{_safe_filename(ref.filename or ref.token)}"
+        output_path = output_dir / f"{record_id}{suffix}-{_safe_filename(ref.filename or ref.token)}"
         return str(download(ref.token, str(output_path)))
 
     def _refetch(self, record_id: str) -> dict[str, Any]:
@@ -606,19 +618,27 @@ def _merge_pin_product_fields(pin_fields: Mapping[str, Any], product_fields: Map
     return merged
 
 
-def _publisher_request(fields: Mapping[str, Any], image_path: str) -> dict[str, Any]:
+def _publisher_request(fields: Mapping[str, Any], image_paths: Sequence[str]) -> dict[str, Any]:
     description = str(fields.get("final_description") or fields.get("draft_description") or "")
     tags = str(fields.get("final_tags") or fields.get("draft_tags") or "").strip()
     if tags:
         description = f"{description}\n\n{tags}".strip()
-    return {
-        "image": image_path,
+    alt_texts = _alt_text_values(fields.get("final_alt_text") or fields.get("draft_alt_text"), len(image_paths))
+    request = {
         "title": str(fields.get("final_title") or fields.get("draft_title") or ""),
         "board": str(fields.get("final_board") or fields.get("pinterest_board") or ""),
         "link": str(fields.get("product_link") or ""),
         "description": description,
-        "altText": str(fields.get("final_alt_text") or fields.get("draft_alt_text") or ""),
     }
+    if len(image_paths) == 1:
+        request["image"] = image_paths[0]
+        request["altText"] = alt_texts[0] if alt_texts else ""
+    else:
+        request["images"] = [
+            {"path": image_path, "altText": alt_texts[index] if index < len(alt_texts) else ""}
+            for index, image_path in enumerate(image_paths)
+        ]
+    return request
 
 
 def _prepare_claim(status: str, run_id: str, minutes: int) -> dict[str, Any]:
@@ -685,6 +705,18 @@ def _attachment_ref(value: Any) -> AttachmentRef | None:
     return None
 
 
+def _attachment_refs(value: Any) -> list[AttachmentRef]:
+    if isinstance(value, list):
+        refs: list[AttachmentRef] = []
+        for item in value:
+            ref = _attachment_ref(item)
+            if ref:
+                refs.append(ref)
+        return refs
+    ref = _attachment_ref(value)
+    return [ref] if ref else []
+
+
 def _attachment_ref_from_mapping(value: Mapping[str, Any]) -> AttachmentRef | None:
     token = str(
         value.get("file_token")
@@ -702,3 +734,37 @@ def _attachment_ref_from_mapping(value: Mapping[str, Any]) -> AttachmentRef | No
 def _safe_filename(value: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in ".-_" else "-" for char in value).strip(".-")
     return cleaned or "attachment"
+
+
+def _path_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if "\n" in text:
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    return [text]
+
+
+def _alt_text_values(value: Any, count: int) -> list[str]:
+    if count <= 0:
+        return []
+    if isinstance(value, list):
+        values = [str(item or "").strip() for item in value]
+    else:
+        text = str(value or "").strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                values = [str(item or "").strip() for item in parsed]
+            else:
+                values = [text]
+        elif count > 1 and "\n" in text:
+            values = [line.strip() for line in text.splitlines()]
+        else:
+            values = [text] if text else []
+    return [*(values[:count]), *([""] * max(0, count - len(values)))]

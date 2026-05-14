@@ -50,12 +50,11 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
     def valid_payload(self) -> dict:
         return {
-            "image": self.make_image(),
+            "images": [{"path": self.make_image(), "altText": "Alt text"}],
             "title": "QA Pin",
             "board": "Example Board",
             "link": "https://example.com",
             "description": "Description",
-            "altText": "Alt text",
             "chromeProfile": "",
             "creationUrl": pinterest_publish_pin.DEFAULT_CREATION_URL,
         }
@@ -81,13 +80,65 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
 
     def test_image_path_must_be_absolute(self) -> None:
         payload = self.valid_payload()
-        payload["image"] = "relative.png"
+        payload["images"] = [{"path": "relative.png", "altText": ""}]
 
         errors, _warnings = pinterest_publish_pin.validate_payload(
             payload, fake_checks(), "validate"
         )
 
-        self.assertIn("image must be an absolute path: relative.png", errors)
+        self.assertIn("images[0].path must be an absolute path: relative.png", errors)
+
+    def test_images_array_accepts_carousel_payload(self) -> None:
+        payload = self.valid_payload()
+        payload["images"] = [
+            {"path": self.make_image(), "altText": "Front"},
+            {"path": self.make_image(), "altText": "Detail"},
+        ]
+
+        errors, warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_images_array_rejects_malformed_items(self) -> None:
+        payload = self.valid_payload()
+        payload["images"] = ["not-an-object"]
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertIn("images[0] must be an object", errors)
+
+    def test_images_array_rejects_non_string_alt_text(self) -> None:
+        payload = self.valid_payload()
+        payload["images"] = [{"path": self.make_image(), "altText": 123}]
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertIn("images[0].altText must be a string", errors)
+
+    def test_images_array_rejects_more_than_five_images(self) -> None:
+        payload = self.valid_payload()
+        payload["images"] = [{"path": self.make_image(), "altText": ""} for _ in range(6)]
+
+        errors, _warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertIn("images array has 6 elements; Pinterest carousel limit is 5", errors)
+
+    def test_normalize_payload_wraps_legacy_image_into_images_array(self) -> None:
+        image = self.make_image()
+        payload = pinterest_publish_pin.normalize_payload(
+            {"image": image, "altText": "Legacy alt"}, self.args()
+        )
+
+        self.assertEqual([{"path": image, "altText": "Legacy alt"}], payload["images"])
 
     def test_link_must_be_absolute_http_url(self) -> None:
         payload = self.valid_payload()
@@ -102,6 +153,17 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
     def test_creation_url_accepts_localized_pin_creation_tool(self) -> None:
         payload = self.valid_payload()
         payload["creationUrl"] = "https://jp.pinterest.com/pin-creation-tool/"
+
+        errors, warnings = pinterest_publish_pin.validate_payload(
+            payload, fake_checks(), "validate"
+        )
+
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_creation_url_accepts_ads_create_for_business_carousels(self) -> None:
+        payload = self.valid_payload()
+        payload["creationUrl"] = "https://ads.pinterest.com/ads/create/"
 
         errors, warnings = pinterest_publish_pin.validate_payload(
             payload, fake_checks(), "validate"
@@ -427,6 +489,29 @@ class PinterestPublishPinValidationTest(unittest.TestCase):
         )
 
         self.assertEqual("https://jp.pinterest.com/pin/123456789/", pin_url)
+
+
+class PinterestCarouselPlaywrightGuardTest(unittest.TestCase):
+    def playwright_source(self) -> str:
+        return (Path(__file__).resolve().parents[1] / "publish_playwright.js").read_text(
+            encoding="utf-8"
+        )
+
+    def test_carousel_type_selection_is_required(self) -> None:
+        source = self.playwright_source()
+
+        self.assertIn("未出现轮播类型选择弹窗", source)
+        self.assertIn("未找到轮播广告选项", source)
+        self.assertNotIn(
+            "if (!(await choiceDialog.isVisible({ timeout: 15000 }).catch(() => false))) {\n    return;",
+            source,
+        )
+
+    def test_published_carousel_url_must_match_current_title(self) -> None:
+        source = self.playwright_source()
+
+        self.assertIn("个人主页未找到标题匹配的新 Pin", source)
+        self.assertNotIn("return pinLinks[0] || ''", source)
 
 
 if __name__ == "__main__":

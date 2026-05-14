@@ -1,9 +1,17 @@
 {
-  "image": "/absolute/path/to/image.jpg",
+  "images": [
+    {
+      "path": "/absolute/path/to/image-1.jpg",
+      "altText": "Example accessible image description for the first image."
+    },
+    {
+      "path": "/absolute/path/to/image-2.jpg",
+      "altText": "Example accessible image description for the second image."
+    }
+  ],
   "title": "Example Pin Title",
   "board": "Example Board",
   "link": "https://example.com/product",
   "description": "Example Pin description for local validation.",
-  "altText": "Example accessible image description.",
   "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
 }
