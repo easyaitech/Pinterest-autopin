@@ -23,7 +23,8 @@ function isPinterestCreateRoute(url) {
       isPinterestHost(parsed.hostname) &&
       (
         parsed.pathname.includes('/pin-creation-tool') ||
-        parsed.pathname.includes('/pin-builder')
+        parsed.pathname.includes('/pin-builder') ||
+        parsed.pathname.includes('/ads/create')
       )
     );
   } catch (_error) {

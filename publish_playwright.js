@@ -14,6 +14,7 @@ const { classifyPinterestLoginState, isPinterestCreateRoute, isPinterestHost } =
 // 配置
 const CDP_PORT = 9222;
 const DEFAULT_PIN_CREATION_URL = process.env.PINTEREST_AUTOPIN_CREATION_URL || 'https://www.pinterest.com/pin-creation-tool/';
+const DEFAULT_CAROUSEL_CREATION_URL = process.env.PINTEREST_AUTOPIN_CAROUSEL_CREATION_URL || 'https://ads.pinterest.com/ads/create/';
 const DEFAULT_CHROME_ARGS = [
   '--disable-blink-features=AutomationControlled'
 ];
@@ -47,6 +48,41 @@ function boardMatches(buttonText, board) {
   return candidates.some(candidate => buttonText.includes(candidate));
 }
 
+async function clickBoardCandidate(page, candidate) {
+  const boardItem = page.getByText(candidate, { exact: false }).first();
+  if (!(await boardItem.isVisible().catch(() => false))) {
+    return false;
+  }
+  try {
+    await boardItem.click({ timeout: 5000 });
+    return true;
+  } catch (error) {
+    logWarn(`Board 普通点击失败，尝试强制点击: ${error.message.split('\n')[0]}`);
+  }
+  try {
+    await boardItem.click({ timeout: 5000, force: true });
+    return true;
+  } catch (error) {
+    logWarn(`Board 强制点击失败，尝试 DOM 点击: ${error.message.split('\n')[0]}`);
+  }
+  return await page.evaluate((name) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const visible = el => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const nodes = Array.from(document.querySelectorAll('[title], [data-test-id*="board"], div, span, button, [role="button"]'));
+    const match = nodes.find(el => visible(el) && normalize(el.textContent).includes(name));
+    if (!match) return false;
+    const clickable = match.closest('button, [role="button"], [data-test-id*="board"]') || match;
+    clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    clickable.click();
+    return true;
+  }, candidate);
+}
+
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -73,6 +109,24 @@ function validateCreationUrl(value) {
     throw new Error(`creationUrl 必须指向 Pinterest 创建页面: ${creationUrl}`);
   }
   return parsed.toString();
+}
+
+function isAdsCreateUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return isPinterestHost(parsed.hostname) && parsed.pathname.includes('/ads/create');
+  } catch (_error) {
+    return false;
+  }
+}
+
+function creationUrlForMode(creationUrl, isCarousel) {
+  const requestedUrl = creationUrl || DEFAULT_PIN_CREATION_URL;
+  if (isCarousel && !isAdsCreateUrl(requestedUrl)) {
+    logWarn(`多图轮播需要企业 Ads Manager Pin 图生成器，改用 ${DEFAULT_CAROUSEL_CREATION_URL}`);
+    return DEFAULT_CAROUSEL_CREATION_URL;
+  }
+  return requestedUrl;
 }
 
 async function setElementText(handle, value) {
@@ -371,7 +425,11 @@ async function waitForPinterestCreateOrLogin(page, timeout = 15000) {
       document.querySelector('[data-test-id*="pin-draft"]') ||
       document.querySelector('[data-test-id*="media"]') ||
       document.querySelector('[contenteditable="true"]') ||
-      document.querySelector('[role="textbox"]')
+      document.querySelector('[role="textbox"]') ||
+      (
+        /\/ads\/create/i.test(url) &&
+        /创建推广计划|Create campaign|创建广告|Create ad|広告を作成/i.test(bodyText)
+      )
     );
     return loginWall || hasCreateSurface;
   }, null, { timeout }).catch(() => {});
@@ -391,7 +449,11 @@ async function detectPinterestCreateState(page) {
       document.querySelector('[data-test-id*="pin-draft"]') ||
       document.querySelector('[data-test-id*="media"]') ||
       document.querySelector('[contenteditable="true"]') ||
-      document.querySelector('[role="textbox"]')
+      document.querySelector('[role="textbox"]') ||
+      (
+        /\/ads\/create/i.test(url) &&
+        /创建推广计划|Create campaign|创建广告|Create ad|広告を作成/i.test(bodyText)
+      )
     );
     return { url, loginWall, hasCreateSurface };
   });
@@ -608,6 +670,285 @@ function compressImage(imagePath, maxWidth = 2000) {
   }
 }
 
+async function clickCreateAdCard(page) {
+  const result = await page.evaluate(() => {
+    const labels = [
+      '创建广告 标准、视频、收藏合辑和轮播广告',
+      '创建广告',
+      'Create ad Standard, video, collection and carousel ads',
+      'Create ad',
+      '広告を作成'
+    ];
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const visible = el => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const candidates = Array.from(document.querySelectorAll('button, [role="button"], [aria-label]'));
+    for (const el of candidates) {
+      if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      const text = normalize([el.textContent, el.getAttribute('aria-label')].filter(Boolean).join(' '));
+      if (labels.some(label => text.includes(normalize(label)))) {
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        el.click();
+        return { success: true, label: el.textContent?.trim() || el.getAttribute('aria-label') };
+      }
+    }
+    return { success: false };
+  });
+
+  if (!result.success) {
+    const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+    if (/广告协议|advertising agreement|同意|agree/i.test(bodyText)) {
+      throw new Error('Pinterest Ads Manager 需要先在页面中同意广告协议后才能创建轮播 Pin');
+    }
+    throw new Error('未找到 Ads Manager 的“创建广告”入口');
+  }
+  logInfo(`✅ 已打开创建广告入口 (${result.label || 'create ad'})`);
+}
+
+async function adsPinBuilderDialog(page) {
+  const dialog = page.locator('[role="dialog"]').filter({
+    hasText: /Pin 图生成器|Pin builder|Pin builder|添加 Pin 图|Add Pin/i
+  }).first();
+  await dialog.waitFor({ timeout: 20000 });
+  return dialog;
+}
+
+async function selectCarouselDraftType(page, imageCount) {
+  const choiceDialog = page.locator('[role="dialog"]').filter({
+    hasText: /轮播|carousel|Carousel|网格|grid/i
+  }).last();
+  if (!(await choiceDialog.isVisible({ timeout: 15000 }).catch(() => false))) {
+    throw new Error(`上传 ${imageCount} 张图片后未出现轮播类型选择弹窗，拒绝继续发布以避免创建错误格式的 Pin`);
+  }
+
+  const carouselChoice = choiceDialog.getByText(/创建一个轮播广告|Create a carousel ad|Carousel ad|轮播广告/i).first();
+  if (!(await carouselChoice.isVisible().catch(() => false))) {
+    const dialogText = await choiceDialog.innerText({ timeout: 5000 }).catch(() => '');
+    throw new Error(`未找到轮播广告选项，拒绝继续发布以避免创建错误格式的 Pin。页面内容: ${dialogText.slice(0, 300)}`);
+  }
+  await carouselChoice.click({ timeout: 10000 });
+  logInfo(`✅ 已选择轮播广告 (${imageCount} 张)`);
+
+  const createPinButton = choiceDialog.getByText(/创建 Pin 图|Create Pin|Create/i).last();
+  if (!(await createPinButton.isVisible().catch(() => false))) {
+    throw new Error('未找到“创建 Pin 图”按钮');
+  }
+  await createPinButton.click({ timeout: 10000 });
+  await page.waitForTimeout(5000);
+}
+
+async function ensureAdsOnlyOff(dialog) {
+  const toggle = dialog.locator('input[name="is-ads-only-toggle"]').first();
+  if (!(await toggle.isVisible().catch(() => false))) return;
+  const checked = await toggle.isChecked().catch(() => false);
+  if (checked) {
+    await toggle.click({ force: true });
+    await dialog.page().waitForTimeout(800);
+    logInfo('✅ 已关闭“仅限广告 Pin 图”');
+  }
+}
+
+async function selectAdsManagerBoard(page, dialog, board) {
+  const boardInfo = parseBoardName(board);
+  const boardCandidates = Array.from(new Set([boardInfo.searchText, ...boardInfo.candidates].filter(Boolean)));
+  const selector = dialog.locator('[data-test-id="board-dropdown-select-button"]').first();
+  if (!(await selector.isVisible().catch(() => false))) {
+    throw new Error('未找到 Ads Manager Pin 图生成器的 Board 选择器');
+  }
+
+  const currentText = await selector.innerText().catch(() => '');
+  if (boardMatches(currentText, board)) {
+    logInfo(`✅ Board 已选择: ${currentText}`);
+    return;
+  }
+
+  await selector.click({ timeout: 5000 }).catch(async () => {
+    await selector.focus();
+    await page.keyboard.press('Enter');
+  });
+  await page.waitForTimeout(1000);
+
+  let bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+  if (!boardCandidates.some(candidate => bodyText.includes(candidate))) {
+    await selector.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1000);
+  }
+
+  const searchInput = page.locator(
+    'input[placeholder*="Search"], input[aria-label*="Search"], input[placeholder*="搜索"], input[aria-label*="搜索"], input[placeholder*="検索"], input[aria-label*="検索"]'
+  ).last();
+  if (await searchInput.isVisible().catch(() => false)) {
+    await searchInput.fill(boardInfo.searchText);
+    await page.waitForTimeout(800);
+  }
+
+  for (const candidate of boardCandidates) {
+    if (await clickBoardCandidate(page, candidate)) {
+      await page.waitForTimeout(1200);
+      const updatedText = await selector.innerText().catch(() => '');
+      if (boardMatches(updatedText, board) || updatedText.includes(candidate)) {
+        logInfo(`✅ 已选择 Board: ${updatedText || candidate}`);
+        return;
+      }
+    }
+  }
+
+  throw new Error(`未能确认 Board 已选中: ${board}`);
+}
+
+async function fillAdsManagerCarouselFields(page, dialog, { title, description, link, board, compressedImages }) {
+  await ensureAdsOnlyOff(dialog);
+
+  if (board) {
+    logInfo(`\n📋 选择 Board (${board})...`);
+    await selectAdsManagerBoard(page, dialog, board);
+  }
+
+  if (title) {
+    const titleInput = dialog.locator('input[name="pinDraftTitle"], input[placeholder*="标题"], input[placeholder*="title" i]').first();
+    await titleInput.fill(title, { timeout: 10000 });
+    logInfo('✅ 标题已填写');
+  }
+
+  if (description) {
+    const descriptionInput = dialog.locator('textarea[name="pinDraftDescription"], textarea[placeholder*="描述"], textarea[placeholder*="description" i]').first();
+    await descriptionInput.fill(description, { timeout: 10000 });
+    logInfo('✅ 描述已填写');
+  }
+
+  if (link) {
+    const linkInput = dialog.locator('input[placeholder*="目标链接"], input[placeholder*="destination" i], input[placeholder*="link" i]').first();
+    await linkInput.fill(link, { timeout: 10000 });
+    logInfo('✅ 链接已填写');
+  }
+
+  const altText = compressedImages
+    .map(img => String(img.altText || '').trim())
+    .filter(Boolean)[0] || description || '';
+  if (altText) {
+    const altButton = dialog.getByText(/添加替代文本|Add alt text|Alt text|代替テキスト|替代文本/i).first();
+    if (await altButton.isVisible().catch(() => false)) {
+      await altButton.scrollIntoViewIfNeeded().catch(() => {});
+      await altButton.click({ timeout: 5000 }).catch(() => {});
+    } else {
+      await clickFirstButtonByLabels(page, [
+        '添加替代文本',
+        'add alt',
+        'alt text',
+        '代替テキスト',
+        '替代文本'
+      ]).catch(() => ({ success: false }));
+    }
+    await page.waitForTimeout(800);
+
+    const altInput = dialog.locator(
+      'textarea[placeholder*="说明用户可以在 Pin 图中发现的内容"], textarea[placeholder*="alt" i], textarea[placeholder*="替代"], textarea[placeholder*="代替"]'
+    ).first();
+    if (await altInput.isVisible().catch(() => false)) {
+      await altInput.fill(altText);
+      logInfo('✅ Alt Text 已填写');
+    } else {
+      logWarn('⚠️ 未找到 Alt Text 输入框，继续发布');
+    }
+  }
+}
+
+async function findPublishedPinFromProfile(context, page, title) {
+  const profileHref = await page.locator(
+    'a[aria-label*="个人资料"], a[aria-label*="profile" i], a[href*="/FuBlessings/"]'
+  ).first().getAttribute('href').catch(() => '');
+  if (!profileHref) {
+    throw new Error('未找到个人主页链接，无法回查发布后的 Pin URL');
+  }
+
+  const profileUrl = new URL(profileHref, page.url());
+  const basePath = profileUrl.pathname.replace(/\/+$/, '');
+  profileUrl.pathname = `${basePath}/_created/`;
+
+  const profilePage = await context.newPage();
+  try {
+    const normalizedTitle = String(title || '').replace(/\s+/g, ' ').trim();
+    if (!normalizedTitle) {
+      throw new Error('轮播 Pin 发布后缺少标题，无法可靠回查新 Pin URL');
+    }
+
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      await profilePage.goto(profileUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await profilePage.waitForTimeout(5000);
+      const pinUrl = await profilePage.evaluate((pinTitle) => {
+        const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const anchors = Array.from(document.querySelectorAll('a[href*="/pin/"]'));
+        const titleLink = anchors.find(anchor => {
+          const text = normalize(anchor.textContent);
+          const aria = normalize(anchor.getAttribute('aria-label'));
+          const titleAttr = normalize(anchor.getAttribute('title'));
+          return [text, aria, titleAttr].some(value => value.includes(pinTitle));
+        });
+        return titleLink ? titleLink.href : '';
+      }, normalizedTitle);
+      if (pinUrl) {
+        return pinUrl;
+      }
+      if (attempt < 6) {
+        logInfo(`⏳ 个人主页暂未出现新 Pin，继续等待 (${attempt}/6)`);
+        await profilePage.waitForTimeout(5000);
+      }
+    }
+    throw new Error(`个人主页未找到标题匹配的新 Pin: ${normalizedTitle}`);
+  } finally {
+    await profilePage.close().catch(() => {});
+  }
+}
+
+async function publishCarouselViaAdsManager(page, context, options) {
+  const { compressedImages, title, board, link, description } = options;
+  logInfo('\n🎠 使用 Ads Manager Pin 图生成器创建轮播 Pin...');
+
+  await page.waitForTimeout(3000);
+  await clickCreateAdCard(page);
+  let dialog = await adsPinBuilderDialog(page);
+
+  const filePaths = compressedImages.map(img => img.compressedPath);
+  logInfo(`\n📤 上传轮播图片 (${filePaths.length} 张)...`);
+  await dialog.locator('input[type="file"]').first().setInputFiles(filePaths);
+  await page.waitForTimeout(8000);
+  await selectCarouselDraftType(page, filePaths.length);
+
+  dialog = await adsPinBuilderDialog(page);
+  await fillAdsManagerCarouselFields(page, dialog, { title, description, link, board, compressedImages });
+
+  let finalUrl = page.url();
+  if (FINAL_MODE) {
+    logInfo('\n🚀 发布轮播 Pin...');
+    await dialog.locator('button[aria-label="发布"], button:has-text("发布"), button:has-text("Publish")').last().click({ timeout: 10000 });
+    for (let i = 0; i < 18; i++) {
+      await page.waitForTimeout(5000);
+      const bodyText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '');
+      if (!/正在发布|Publishing/i.test(bodyText)) break;
+    }
+    finalUrl = await findPublishedPinFromProfile(context, page, title);
+    logInfo(`✅ 轮播 Pin 已发布: ${finalUrl}`);
+  } else {
+    logInfo('🧪 测试模式已填好轮播草稿，未点击发布');
+  }
+
+  return {
+    ok: true,
+    mode: FINAL_MODE ? 'final' : TEST_MODE ? 'test' : 'interactive',
+    images: compressedImages.map(img => img.path),
+    isCarousel: true,
+    title,
+    board,
+    link,
+    finalUrl,
+    completedAt: new Date().toISOString()
+  };
+}
+
 async function publishPin(options) {
   const { images = [], title, board, link, description, chromeProfile, creationUrl = DEFAULT_PIN_CREATION_URL } = options;
   // Backward compat: flat image/altText → images array
@@ -615,6 +956,7 @@ async function publishPin(options) {
     ? images
     : (options.image ? [{ path: options.image, altText: options.altText || '' }] : []);
   const isCarousel = resolvedImages.length > 1;
+  const effectiveCreationUrl = creationUrlForMode(creationUrl, isCarousel);
   let browserSession;
 
   console.log('='.repeat(60));
@@ -657,7 +999,7 @@ async function publishPin(options) {
     // 导航到 Pinterest 创建页面
     logInfo('📍 打开 Pinterest 创建页面...');
     try {
-      await openPinBuilder(page, { waitUntil: 'networkidle', resetDraft: true, creationUrl });
+      await openPinBuilder(page, { waitUntil: 'networkidle', resetDraft: true, creationUrl: effectiveCreationUrl });
     } catch (e) {
       logWarn(`导航超时，尝试继续...`);
     }
@@ -669,6 +1011,27 @@ async function publishPin(options) {
     const loginState = classifyPinterestLoginState(createState);
     if (!loginState.ok) {
       throw new Error(loginState.reason);
+    }
+
+    if (isCarousel && isAdsCreateUrl(page.url())) {
+      const result = await publishCarouselViaAdsManager(page, ctx, {
+        compressedImages,
+        title,
+        board,
+        link,
+        description
+      });
+      console.log('\n' + '='.repeat(60));
+      logInfo(TEST_MODE ? '🧪 轮播测试完成 - 请检查内容是否正确' : '✅ 轮播发布完成');
+      console.log(`  URL: ${result.finalUrl}`);
+      console.log('='.repeat(60));
+      if (FINAL_MODE && pinData) {
+        const urlFile = '/tmp/published_pin_url.txt';
+        fs.writeFileSync(urlFile, result.finalUrl);
+        console.log(`📝 Pin URL saved to: ${urlFile}`);
+      }
+      writeStructuredResult(RESULT_JSON_PATH, result);
+      return result;
     }
 
     // 步骤 1: 上传图片
@@ -873,9 +1236,7 @@ async function publishPin(options) {
 
               // 选择 Board
               for (const candidate of boardCandidates) {
-                const boardItem = page.getByText(candidate, { exact: false }).first();
-                if (await boardItem.isVisible().catch(() => false)) {
-                  await boardItem.click();
+                if (await clickBoardCandidate(page, candidate)) {
                   await randomDelay(1);
                   const updatedBoard = await page.$(boardButtonSelectors.join(', '));
                   const updatedText = updatedBoard ? await updatedBoard.textContent() || '' : '';
@@ -920,9 +1281,7 @@ async function publishPin(options) {
             await randomDelay(1);
 
             for (const candidate of boardCandidates) {
-              const boardItem = page.getByText(candidate, { exact: false }).first();
-              if (await boardItem.isVisible().catch(() => false)) {
-                await boardItem.click();
+              if (await clickBoardCandidate(page, candidate)) {
                 await randomDelay(1);
                 const updatedBoard = await page.$(boardButtonSelectors.join(', '));
                 const updatedText = updatedBoard ? await updatedBoard.textContent() || '' : '';
@@ -1032,9 +1391,11 @@ async function publishPin(options) {
     }
 
     // 步骤 6: 添加 Alt Text
-    const altTexts = compressedImages.map(img => img.altText).filter(Boolean);
-    if (altTexts.length > 0) {
-      logInfo(`\n🖼️ 步骤 6: 添加 Alt Text (${altTexts.length} 条)...`);
+    const altItems = compressedImages
+      .map((img, index) => ({ index, value: String(img.altText || '').trim() }))
+      .filter(item => item.value);
+    if (altItems.length > 0) {
+      logInfo(`\n🖼️ 步骤 6: 添加 Alt Text (${altItems.length} 条)...`);
 
       await clickFirstButtonByLabels(page, [
         'more options',
@@ -1102,7 +1463,7 @@ async function publishPin(options) {
       }
 
       if (!isCarousel) {
-        const altResult = await fillOneAltText(altTexts[0]);
+        const altResult = await fillOneAltText(altItems[0].value);
         if (altResult.success) {
           logInfo(`✅ Alt Text 已填写 (${altResult.selector || 'alt text'}, ${altResult.length} 字符)`);
         } else {
@@ -1111,28 +1472,27 @@ async function publishPin(options) {
       } else {
         // Carousel: try to set alt text per image by clicking each carousel thumbnail
         const carouselThumbs = await page.$$('[data-test-id*="carousel"] [role="button"], [data-test-id*="carousel-card"], [data-test-id*="storyboard-page"]');
-        if (carouselThumbs.length >= altTexts.length) {
-          for (let idx = 0; idx < altTexts.length; idx++) {
-            if (!altTexts[idx]) continue;
+        if (carouselThumbs.length >= compressedImages.length) {
+          for (const item of altItems) {
             try {
-              await carouselThumbs[idx].click();
+              await carouselThumbs[item.index].click();
               await randomDelay(1);
-              const altResult = await fillOneAltText(altTexts[idx]);
+              const altResult = await fillOneAltText(item.value);
               if (altResult.success) {
-                logInfo(`✅ 图 ${idx + 1} Alt Text 已填写 (${altResult.length} 字符)`);
+                logInfo(`✅ 图 ${item.index + 1} Alt Text 已填写 (${altResult.length} 字符)`);
               } else {
-                logWarn(`⚠️ 图 ${idx + 1} Alt Text 未能写入，需手动补填`);
+                logWarn(`⚠️ 图 ${item.index + 1} Alt Text 未能写入，需手动补填`);
               }
             } catch (e) {
-              logWarn(`⚠️ 图 ${idx + 1} Alt Text 设置失败: ${e.message}`);
+              logWarn(`⚠️ 图 ${item.index + 1} Alt Text 设置失败: ${e.message}`);
             }
           }
         } else {
           // Fallback: fill first alt text into the visible field
-          logWarn(`⚠️ 未找到轮播缩略图 (期望 ${altTexts.length}，找到 ${carouselThumbs.length})，填写第 1 张 Alt Text`);
-          const altResult = await fillOneAltText(altTexts[0]);
+          logWarn(`⚠️ 未找到轮播缩略图 (期望 ${compressedImages.length}，找到 ${carouselThumbs.length})，填写第 ${altItems[0].index + 1} 张 Alt Text`);
+          const altResult = await fillOneAltText(altItems[0].value);
           if (altResult.success) {
-            logInfo(`✅ 图 1 Alt Text 已填写，其余 ${altTexts.length - 1} 张需手动补填`);
+            logInfo(`✅ 图 ${altItems[0].index + 1} Alt Text 已填写，其余 ${altItems.length - 1} 条需手动补填`);
           } else {
             logWarn('⚠️ Alt Text 未能写入，需全部手动补填');
           }

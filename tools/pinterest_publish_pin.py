@@ -68,7 +68,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--creation-url",
         dest="creation_url",
-        help="Pinterest Pin creation URL, for example https://jp.pinterest.com/pin-creation-tool/.",
+        help=(
+            "Pinterest creation URL, for example https://jp.pinterest.com/pin-creation-tool/ "
+            "or https://ads.pinterest.com/ads/create/ for business carousel Pins."
+        ),
     )
     parser.add_argument(
         "--print-chrome-profile",
@@ -177,17 +180,18 @@ def chrome_profile_metadata(source: str) -> dict[str, str]:
     }
 
 
-def normalize_images(payload: dict[str, Any], args: argparse.Namespace) -> list[dict[str, str]]:
+def normalize_images(payload: dict[str, Any], args: argparse.Namespace) -> list[Any]:
     """Build the images array from either ``images`` key or flat ``image``/``altText``."""
     images_raw = payload.get("images")
     if isinstance(images_raw, list) and images_raw:
-        result: list[dict[str, str]] = []
+        result: list[Any] = []
         for item in images_raw:
             if not isinstance(item, dict):
+                result.append(item)
                 continue
             result.append({
-                "path": str(item.get("path") or ""),
-                "altText": str(item.get("altText") or item.get("alt_text") or ""),
+                "path": item.get("path") or "",
+                "altText": item.get("altText") if item.get("altText") is not None else item.get("alt_text", ""),
             })
         return result
 
@@ -307,7 +311,11 @@ def validate_creation_url(creation_url: str) -> list[str]:
     host = (parsed.hostname or "").lower()
     if host != "pinterest.com" and not host.endswith(".pinterest.com"):
         return [f"creationUrl must be a Pinterest URL: {creation_url}"]
-    if "/pin-creation-tool" not in parsed.path and "/pin-builder" not in parsed.path:
+    if (
+        "/pin-creation-tool" not in parsed.path
+        and "/pin-builder" not in parsed.path
+        and "/ads/create" not in parsed.path
+    ):
         return [f"creationUrl must point to a Pinterest creation page: {creation_url}"]
     return []
 
@@ -325,17 +333,27 @@ def validate_payload(payload: dict[str, Any], checks: dict[str, Any], mode: str)
 
     if mode != "check-login":
         images = payload.get("images", [])
-        if not images:
+        if not isinstance(images, list):
+            errors.append("images must be an array")
+        elif not images:
             errors.append("images array is required (or provide flat image field)")
         else:
             for i, img in enumerate(images):
+                if not isinstance(img, dict):
+                    errors.append(f"images[{i}] must be an object")
+                    continue
                 img_path = img.get("path", "")
-                if not img_path:
+                if not isinstance(img_path, str):
+                    errors.append(f"images[{i}].path must be a string")
+                elif not img_path:
                     errors.append(f"images[{i}].path is required")
                 elif not Path(img_path).is_absolute():
                     errors.append(f"images[{i}].path must be an absolute path: {img_path}")
                 elif not Path(img_path).exists():
                     errors.append(f"images[{i}].path does not exist: {img_path}")
+                alt_text = img.get("altText", "")
+                if not isinstance(alt_text, str):
+                    errors.append(f"images[{i}].altText must be a string")
             if len(images) > 5:
                 errors.append(f"images array has {len(images)} elements; Pinterest carousel limit is 5")
 

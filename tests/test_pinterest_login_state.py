@@ -67,6 +67,17 @@ class PinterestLoginStateTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
 
+    def test_ads_create_surface_is_ok_for_business_carousel_flow(self) -> None:
+        result = classify(
+            {
+                "url": "https://ads.pinterest.com/advertiser/123/ads/create/",
+                "loginWall": False,
+                "hasCreateSurface": True,
+            }
+        )
+
+        self.assertTrue(result["ok"])
+
     def test_localized_pin_creation_tool_without_surface_is_not_login_redirect(self) -> None:
         result = classify(
             {

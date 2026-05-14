@@ -1,7 +1,7 @@
 ---
 name: pinterest-autopin
 version: 1.3.7
-description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a single Pinterest Pin through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
+description: Use this skill when the user wants to validate Pinterest login, set up the Feishu/Hermes Pinterest workflow, or validate, test, or publish a Pinterest Pin or carousel through the Pinterest AutoPin Playwright automation from the easyaitech/Pinterest-autopin GitHub repository.
 ---
 
 # Pinterest AutoPin
@@ -71,19 +71,21 @@ Prepare a JSON object with this shape:
 
 ```json
 {
-  "image": "/absolute/path/to/image.jpg",
+  "images": [
+    {"path": "/absolute/path/to/image-1.jpg", "altText": "Accessible description for image 1"},
+    {"path": "/absolute/path/to/image-2.jpg", "altText": "Accessible description for image 2"}
+  ],
   "title": "Pin title",
   "board": "Pinterest board name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description",
   "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
 }
 ```
 
 Required:
 
-- `image`: absolute path to an existing image file.
+- `images`: 1-5 absolute paths to existing image files. Use 2-5 images for a carousel. The legacy `image` field is still accepted for single-image Pins.
 - `title`: Pin title.
 - `board`: required for `test` and `final`; `validate` allows it to be empty but should warn.
 
@@ -91,13 +93,15 @@ Optional:
 
 - `link`
 - `description`
-- `altText`
+- per-image `altText` inside `images[]`, or legacy top-level `altText` for a single image
 - `creationUrl`, only needed to target a localized creation surface such as `https://jp.pinterest.com/pin-creation-tool/`
 - `chromeProfile`, only needed to override the default dedicated profile
 
 `link`, when present, must be an absolute `http` or `https` URL.
 `creationUrl`, when present, must be an absolute Pinterest creation URL.
 `chromeProfile`, when present, must be an absolute path to a dedicated Chrome user data directory. If it is omitted, the CLI resolves a stable profile automatically.
+
+Carousel Pins require a Pinterest business account. For 2-5 `images[]` items, the publisher automatically switches to Ads Manager's Pin builder (`https://ads.pinterest.com/ads/create/`), chooses "carousel ad" after upload, publishes the Pin from the builder, and leaves the surrounding ad campaign draft unpublished.
 
 The dedicated Chrome profile display name is `Pinterest AutoPin` after initialization, so the user can tell it apart from personal Chrome profiles.
 

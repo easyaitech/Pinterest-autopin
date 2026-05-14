@@ -1,6 +1,6 @@
 # Pinterest AutoPin
 
-Single-pin Pinterest publishing repo with two official interfaces:
+Pinterest Pin and carousel publishing repo with two official interfaces:
 
 1. CLI mode for humans, scripts, cron jobs, and generic automation.
 2. Agent Skill mode for Hermes-compatible agents.
@@ -12,7 +12,7 @@ Single-pin Pinterest publishing repo with two official interfaces:
 - `tools/pinterest_publish_pin.py`
   The CLI interface. It validates input, locates the Chrome profile, runs the publisher, and emits JSON.
 - `.agents/skills/pinterest-autopin/SKILL.md`
-  The Hermes agent Skill interface. It tells an agent how to validate, test, and publish one Pin through the CLI interface.
+  The Hermes agent Skill interface. It tells an agent how to validate, test, and publish one Pin or carousel through the CLI interface.
 
 ```text
 publish_playwright.js
@@ -214,7 +214,7 @@ python3 tools/feishu_pinterest_worker.py publish \
 ```
 
 Do not ask for image path, Pin title, Board, link, description, or alt text at this stage.
-Only collect `image`, `title`, `board`, `link`, `description`, and `altText` when you are intentionally running a one-off `test` or `final` publish flow.
+Only collect `images`, `title`, `board`, `link`, and `description` when you are intentionally running a one-off `test` or `final` publish flow. For legacy single-image requests, `image` plus `altText` is still accepted.
 
 Publish for real:
 
@@ -234,13 +234,24 @@ npm run pin:publish -- --input examples/request.json
 
 ```json
 {
-  "image": "/absolute/path/to/image.jpg",
+  "images": [
+    {"path": "/absolute/path/to/image-1.jpg", "altText": "Accessible description for image 1"},
+    {"path": "/absolute/path/to/image-2.jpg", "altText": "Accessible description for image 2"}
+  ],
   "title": "Your pin title",
   "board": "Board Name",
   "link": "https://example.com",
   "description": "Pin description",
-  "altText": "Accessible image description",
   "creationUrl": "https://jp.pinterest.com/pin-creation-tool/"
+}
+```
+
+The legacy single-image shape is still accepted:
+
+```json
+{
+  "image": "/absolute/path/to/image.jpg",
+  "altText": "Accessible image description"
 }
 ```
 
@@ -269,8 +280,10 @@ The Python tool prints JSON to stdout. On success, it includes:
 - `--mode check-login` opens the Pinterest creation page only to confirm the profile is logged in. It does not upload, fill, or publish.
 - `--mode test` opens the Pinterest creation page and fills the form, but does not publish.
 - `board` is required in `test` and `final` mode. There is no silent default board.
-- `image` must be an absolute path. `link`, when present, must be an absolute `http` or `https` URL.
+- `images` must contain 1-5 absolute image paths. Use 2-5 images for a Pinterest carousel. The legacy `image` field is wrapped into a single-item `images` array.
+- `link`, when present, must be an absolute `http` or `https` URL.
 - `creationUrl` is optional and defaults to `https://www.pinterest.com/pin-creation-tool/`. Use `https://jp.pinterest.com/pin-creation-tool/` for the localized storyboard creation UI.
+- Carousel Pins require a Pinterest business account. When `images[]` has 2-5 items, the Playwright publisher automatically uses Ads Manager's Pin builder (`https://ads.pinterest.com/ads/create/`) and creates a carousel Pin there. It publishes the Pin from the builder, but it does not publish the surrounding ad campaign draft.
 - `chromeProfile` is optional. If omitted, the CLI resolves a stable profile automatically.
 - If the resolved profile directory does not exist, it will be created.
 - `publish_playwright.js` now supports:
@@ -427,11 +440,12 @@ Official `lark-cli` uses:
 `prepare` and `publish` require either an atomic Feishu compare-update lock or explicit `hermes_singleton` lock modes. If the CLI does not expose atomic compare-update and singleton mode is not configured, the worker refuses to mutate rows instead of using a non-atomic fallback.
 For official `lark-cli`, use `hermes_singleton` only after the Hermes schedules are configured with max concurrency 1.
 
-`prepare` claims ready rows, requires each Pin to link to a complete Products row, downloads `source_image`, generates higher-intent Pinterest draft fields, uploads `processed_image`, and moves rows to human review. `publish` also reads the linked Products row so the Etsy URL and product facts come from the product source of truth, then downloads the approved `final_image` into the run temp directory before calling the Pinterest publisher.
+`prepare` claims ready rows, requires each Pin to link to a complete Products row, downloads `source_image`, generates higher-intent Pinterest draft fields, uploads `processed_image`, and moves rows to human review. `publish` also reads the linked Products row so the Etsy URL and product facts come from the product source of truth, then downloads the approved `final_image` attachment(s) into the run temp directory before calling the Pinterest publisher. If `final_image` has multiple attachments, publish sends them as a carousel `images[]` request.
 
 The worker keeps all output in the existing draft fields; no extra Feishu fields are required. Draft generation now does five things:
 
 - Reads product information from the linked `Products` row: `product_name`, `product_description`, `product_link`, optional `brand_name`, `keywords`, and `notes`. Pins provide workflow inputs such as `pinterest_board`, images, status, and human-reviewed final fields.
+- For carousel Pins, put 2-5 files in `final_image`. Put per-image final alt text in `final_alt_text` as separate lines, or as a JSON array string such as `["Front view", "Detail view"]`.
 - Extracts lightweight image signals from the downloaded image path: dimensions, orientation, filename product terms, and filename style/material terms.
 - Chooses a Pinterest search intent such as gift, personalized gift, occasion gift, home decor, or printable/download.
 - Writes Etsy-conversion copy: title with search intent, description with a clear Etsy click cue, tags with product/audience/style terms, and alt text.
@@ -449,7 +463,7 @@ Hermes run identity
   -> Pinterest check-login
   -> scan approved due Pins across pages
   -> claim one Pin and increment publish_attempts
-  -> download final_image attachment
+  -> download final_image attachment(s)
   -> final publish
   -> Feishu writeback
 ```

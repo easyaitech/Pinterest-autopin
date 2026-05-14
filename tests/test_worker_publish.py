@@ -203,6 +203,54 @@ class WorkerPublishTest(unittest.TestCase):
         self.assertEqual(3, store.pin["fields"]["publish_attempts"])
         self.assertEqual("final-token", store.downloads[0][0])
         self.assertTrue(publisher.last_request["image"].endswith("pin-1-image.jpg"))
+        self.assertEqual("Alt", publisher.last_request["altText"])
+
+    def test_publish_passes_multiple_final_images_as_carousel_request(self) -> None:
+        pins = [
+            {
+                "record_id": "pin-carousel",
+                "fields": {
+                    "status": "已批准待发布",
+                    "scheduled_at": "2000-01-01T00:00:00Z",
+                    "final_image": [
+                        {"file_token": "front-token", "name": "front.jpg"},
+                        {"file_token": "detail-token", "name": "detail.jpg"},
+                    ],
+                    "final_title": "Carousel Title",
+                    "final_board": "Board",
+                    "product": [{"record_id": "product-1"}],
+                    "final_description": "Desc",
+                    "final_alt_text": "Front view\nDetail view",
+                    "publish_attempts": 0,
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = FakeStore(pins=pins)
+            publisher = FakePublisher()
+            worker = FeishuPinterestWorker(config(), runtime(temp_dir), store, publisher)
+
+            result = worker.publish()
+
+        self.assertTrue(result.ok)
+        self.assertNotIn("image", publisher.last_request)
+        self.assertEqual(
+            ["front-token", "detail-token"],
+            [token for token, _path in store.downloads],
+        )
+        self.assertEqual(
+            [
+                {
+                    "path": str(Path(temp_dir) / "final-images" / "pin-carousel-1-front.jpg"),
+                    "altText": "Front view",
+                },
+                {
+                    "path": str(Path(temp_dir) / "final-images" / "pin-carousel-2-detail.jpg"),
+                    "altText": "Detail view",
+                },
+            ],
+            publisher.last_request["images"],
+        )
 
     def test_publish_scans_past_first_ineligible_record(self) -> None:
         pins = [
