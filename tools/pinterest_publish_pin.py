@@ -242,21 +242,41 @@ def normalize_payload(file_payload: dict[str, Any], args: argparse.Namespace) ->
     return payload
 
 
+def cdp_ports() -> list[int]:
+    raw = os.environ.get("PINTEREST_AUTOPIN_CDP_PORT") or os.environ.get("PINTEREST_CDP_PORT")
+    if raw:
+        try:
+            return [int(raw)]
+        except ValueError:
+            return [9225, 9222]
+    return [9225, 9222]
+
+
 def cdp_status() -> dict[str, Any]:
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as response:
-            payload = json.load(response)
-        return {
-            "reachable": True,
-            "webSocketDebuggerUrl": payload.get("webSocketDebuggerUrl", ""),
-            "browser": payload.get("Browser", ""),
-        }
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-        return {
-            "reachable": False,
-            "webSocketDebuggerUrl": "",
-            "browser": "",
-        }
+    attempted: list[int] = []
+    last_port = cdp_ports()[0]
+    for port in cdp_ports():
+        last_port = port
+        attempted.append(port)
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2) as response:
+                payload = json.load(response)
+            return {
+                "reachable": True,
+                "port": port,
+                "attemptedPorts": attempted,
+                "webSocketDebuggerUrl": payload.get("webSocketDebuggerUrl", ""),
+                "browser": payload.get("Browser", ""),
+            }
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            continue
+    return {
+        "reachable": False,
+        "port": last_port,
+        "attemptedPorts": attempted,
+        "webSocketDebuggerUrl": "",
+        "browser": "",
+    }
 
 
 def build_checks() -> dict[str, Any]:
@@ -629,6 +649,28 @@ def main() -> int:
 
     if args.mode == "validate" or errors:
         return print_json(response, 0 if not errors else 1)
+
+    cdp = checks.get("chromeCdp", {})
+    if cdp.get("reachable"):
+        os.environ.setdefault("PINTEREST_AUTOPIN_CDP_PORT", str(cdp.get("port")))
+
+    if payload["chromeProfile"] and chrome_profile_appears_open(payload["chromeProfile"]) and cdp.get("reachable"):
+        response["warnings"].append(
+            f"Chrome profile is already open; using live Chrome CDP on port {cdp.get('port')} instead"
+        )
+        payload["chromeProfile"] = ""
+        response["payload"] = payload
+
+    if args.mode in {"test", "final"}:
+        preflight = run_publish(payload, "check-login", min(args.timeout, 120))
+        response["preflight"] = preflight
+        if not preflight["ok"]:
+            response["ok"] = False
+            response["errors"].append(
+                "Pinterest login preflight failed; aborting before test/final publish"
+            )
+            response["errors"].append(execution_error_message(preflight))
+            return print_json(response, 1)
 
     if payload["chromeProfile"] and chrome_profile_appears_open(payload["chromeProfile"]):
         response["warnings"].append(

@@ -12,7 +12,14 @@ const path = require('path');
 const { classifyPinterestLoginState, isPinterestCreateRoute, isPinterestHost } = require('./pinterest_login_state');
 
 // 配置
-const CDP_PORT = 9222;
+const CDP_PORTS = (() => {
+  const raw = process.env.PINTEREST_AUTOPIN_CDP_PORT || process.env.PINTEREST_CDP_PORT;
+  if (raw) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? [parsed] : [9225, 9222];
+  }
+  return [9225, 9222];
+})();
 const DEFAULT_PIN_CREATION_URL = process.env.PINTEREST_AUTOPIN_CREATION_URL || 'https://www.pinterest.com/pin-creation-tool/';
 const DEFAULT_CAROUSEL_CREATION_URL = process.env.PINTEREST_AUTOPIN_CAROUSEL_CREATION_URL || 'https://ads.pinterest.com/ads/create/';
 const DEFAULT_CHROME_ARGS = [
@@ -490,14 +497,22 @@ function fetchJson(url, timeoutMs = 5000) {
 }
 
 async function resolveBrowserEndpointUrl() {
-  const versionUrl = `http://127.0.0.1:${CDP_PORT}/json/version`;
-  const payload = await fetchJson(versionUrl);
-  if (!payload.webSocketDebuggerUrl) {
-    throw new Error(`CDP discovery at ${versionUrl} did not return webSocketDebuggerUrl`);
+  const errors = [];
+  for (const port of CDP_PORTS) {
+    const versionUrl = `http://127.0.0.1:${port}/json/version`;
+    try {
+      const payload = await fetchJson(versionUrl);
+      if (!payload.webSocketDebuggerUrl) {
+        throw new Error(`CDP discovery at ${versionUrl} did not return webSocketDebuggerUrl`);
+      }
+      const endpointUrl = payload.webSocketDebuggerUrl;
+      logInfo(`🔗 使用动态 CDP websocket endpoint: ${endpointUrl}`);
+      return endpointUrl;
+    } catch (e) {
+      errors.push(`${port}: ${e.message}`);
+    }
   }
-  const endpointUrl = `http://127.0.0.1:${CDP_PORT}`;
-  logInfo(`🔗 使用动态 CDP endpoint: ${endpointUrl}`);
-  return endpointUrl;
+  throw new Error(`No reachable Chrome CDP endpoint. Tried ports ${CDP_PORTS.join(', ')}. ${errors.join(' | ')}`);
 }
 
 async function createBrowserSession(chromeProfile) {
@@ -518,7 +533,7 @@ async function createBrowserSession(chromeProfile) {
     };
   }
 
-  logInfo(`🔗 未提供 Chrome profile，尝试连接本地 CDP ${CDP_PORT}...`);
+  logInfo(`🔗 未提供 Chrome profile，尝试连接本地 CDP ${CDP_PORTS.join(', ')}...`);
   const browserEndpointUrl = await resolveBrowserEndpointUrl();
   const browser = await chromium.connectOverCDP(browserEndpointUrl);
   const contexts = browser.contexts();
